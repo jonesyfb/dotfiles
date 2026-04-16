@@ -1,0 +1,27 @@
+[submodule "fuzzel"]
+	path = fuzzel
+	url = https://github.com/jonesyfb/fuzzel.git
+
+[submodule "kitty"]
+	path = kitty
+	url = https://github.com/jonesyfb/kitty.git
+
+[submodule "niri"]
+	path = niri
+	url = https://github.com/jonesyfb/niri.git
+
+[submodule "quickshell"]
+	path = quickshell
+	url = https://github.com/jonesyfb/quickshell.git
+
+[submodule "swaylock"]
+	path = swaylock
+	url = https://github.com/jonesyfb/swaylock.git
+
+[submodule "vim"]
+	path = vim
+	url = https://github.com/jonesyfb/vim.git
+
+[submodule "zed"]
+	path = zed
+	url = https://github.com/jonesyfb/zed.git
