@@ -17,8 +17,8 @@ from pathlib import Path
 
 from config import Config
 
-# Crow voice chain: pitch up into crow range, cut bass, boost treble, hard overdrive for scratchiness
-_SOX_EFFECTS = "pitch +400 bass -8 treble +7 overdrive 28"
+# Crow voice: slight pitch up, scratchy overdrive, treble boost, gain normalize
+_SOX_EFFECTS = "pitch +200 bass -5 treble +5 overdrive 18 gain -4"
 
 
 class VoiceEngine:
