@@ -7,6 +7,7 @@ import asyncio
 import base64
 import json
 import os
+import shlex
 import sys
 from pathlib import Path
 
@@ -301,7 +302,96 @@ class HuginnDaemon:
         print(f"Huginn is watching. Socket: {Config.socket_path}", flush=True)
 
         async with server:
+            asyncio.create_task(self._monitor_loop())
             await server.serve_forever()
+
+    # ── Proactive system monitoring ───────────────────────────────────────────
+
+    _MONITOR_INTERVAL = 60   # seconds between checks
+    _COOLDOWN         = 300  # seconds before re-alerting the same condition
+
+    _ALERTS = {
+        "cpu_temp": {
+            "threshold": 85,
+            "message":   "CPU temperature has reached {value}°C. The cores approach Muspelheim.",
+            "title":     "ᚠ Huginn — Thermal Warning",
+        },
+        "disk": {
+            "threshold": 90,
+            "message":   "Disk usage at {value}%. The World Tree's roots grow crowded.",
+            "title":     "ᚦ Huginn — Disk Warning",
+        },
+        "memory": {
+            "threshold": 90,
+            "message":   "Memory at {value}%. RAM approaches the void.",
+            "title":     "ᚾ Huginn — Memory Warning",
+        },
+    }
+
+    async def _monitor_loop(self) -> None:
+        last_alert: dict[str, float] = {}
+        await asyncio.sleep(30)  # let daemon settle before first check
+        while True:
+            try:
+                now = asyncio.get_event_loop().time()
+                await self._check_cpu_temp(now, last_alert)
+                await self._check_disk(now, last_alert)
+                await self._check_memory(now, last_alert)
+            except Exception as e:
+                print(f"Monitor error: {e}", flush=True)
+            await asyncio.sleep(self._MONITOR_INTERVAL)
+
+    async def _alert(self, key: str, value: int, now: float, last_alert: dict) -> None:
+        if now - last_alert.get(key, 0) < self._COOLDOWN:
+            return
+        last_alert[key] = now
+        cfg     = self._ALERTS[key]
+        message = cfg["message"].format(value=value)
+        title   = cfg["title"]
+        print(f"ALERT [{key}]: {message}", flush=True)
+        try:
+            await asyncio.create_subprocess_shell(
+                f"notify-send -u critical {shlex.quote(title)} {shlex.quote(message)}"
+            )
+        except Exception:
+            pass
+        try:
+            await self.voice.speak(message)
+        except Exception:
+            pass
+
+    async def _check_cpu_temp(self, now: float, last_alert: dict) -> None:
+        # Try hwmon sysfs first, fall back to sensors command
+        import glob as _glob
+        paths = _glob.glob("/sys/class/hwmon/hwmon*/temp*_input")
+        for p in paths:
+            try:
+                val = int(Path(p).read_text().strip()) // 1000
+                if val > self._ALERTS["cpu_temp"]["threshold"]:
+                    await self._alert("cpu_temp", val, now, last_alert)
+                    return
+            except Exception:
+                continue
+
+    async def _check_disk(self, now: float, last_alert: dict) -> None:
+        import shutil as _shutil
+        usage = _shutil.disk_usage("/")
+        pct   = int(usage.used / usage.total * 100)
+        if pct >= self._ALERTS["disk"]["threshold"]:
+            await self._alert("disk", pct, now, last_alert)
+
+    async def _check_memory(self, now: float, last_alert: dict) -> None:
+        try:
+            lines = Path("/proc/meminfo").read_text().splitlines()
+            info  = {l.split(":")[0]: int(l.split()[1]) for l in lines if ":" in l}
+            total = info.get("MemTotal", 0)
+            avail = info.get("MemAvailable", 0)
+            if total > 0:
+                pct = int((total - avail) / total * 100)
+                if pct >= self._ALERTS["memory"]["threshold"]:
+                    await self._alert("memory", pct, now, last_alert)
+        except Exception:
+            pass
 
 
 if __name__ == "__main__":
