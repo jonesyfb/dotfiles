@@ -4,6 +4,7 @@ Huginn daemon — Unix socket server.
 Handles chat with tool calling loop, theme switching, and session history.
 """
 import asyncio
+import base64
 import json
 import os
 import sys
@@ -85,6 +86,12 @@ class HuginnDaemon:
                 tts  = msg.get("tts", False)
                 if path:
                     await self._handle_voice(path, tts, writer)
+            case "image_file":
+                path    = msg.get("path", "")
+                caption = msg.get("caption", "").strip()
+                tts     = msg.get("tts", False)
+                if path:
+                    await self._handle_image(path, caption, writer, speak=tts)
             case "clear":
                 self.history.clear()
                 await self._send(writer, {"type": "cleared"})
@@ -97,9 +104,9 @@ class HuginnDaemon:
                 await self._send(writer, {"type": "confirm_ack"})
             case "password_submit":
                 pwd_id   = msg.get("id", "")
-                password = msg.get("password", "")
+                password = msg.get("password")  # None if key missing, "" if cancelled
                 if pwd_id in self._pending_passwords:
-                    self._password_values[pwd_id] = password
+                    self._password_values[pwd_id] = password  # None = cancelled
                     self._pending_passwords[pwd_id].set()
                 await self._send(writer, {"type": "password_ack"})
             case "switch_model":
@@ -131,7 +138,8 @@ class HuginnDaemon:
         await self._send(writer, {"type": "password_required", "id": pwd_id})
         try:
             await asyncio.wait_for(event.wait(), timeout=60)
-            return self._password_values.pop(pwd_id, None)
+            pwd = self._password_values.pop(pwd_id, None)
+            return pwd if pwd else None  # treat empty string as cancel
         except asyncio.TimeoutError:
             return None
         finally:
@@ -152,14 +160,34 @@ class HuginnDaemon:
     async def _handle_chat(self, content: str, writer: asyncio.StreamWriter, speak: bool = False) -> None:
         self.history.append({"role": "user", "content": content})
         save_message("user", content)
-
         await self._maybe_summarize()
+        await self._run_llm_loop(content, writer, speak)
 
+    async def _handle_image(self, path: str, caption: str, writer: asyncio.StreamWriter, speak: bool = False) -> None:
+        try:
+            img_bytes = Path(path).read_bytes()
+            b64       = base64.b64encode(img_bytes).decode()
+        except Exception as e:
+            await self._send(writer, {"type": "error", "message": f"Failed to read image: {e}"})
+            await self._send(writer, {"type": "done"})
+            return
+        display = caption or "What is this image?"
+        self.history.append({
+            "role":       "user",
+            "content":    display,
+            "image_b64":  b64,
+            "image_type": "image/png",
+        })
+        save_message("user", f"[image] {display}")
+        await self._maybe_summarize()
+        await self._run_llm_loop(display, writer, speak)
+
+    async def _run_llm_loop(self, query: str, writer: asyncio.StreamWriter, speak: bool = False) -> None:
         try:
             loop = asyncio.get_event_loop()
             memories, knowledge = await asyncio.gather(
                 loop.run_in_executor(None, load_memories),
-                loop.run_in_executor(None, knowledge_query, content),
+                loop.run_in_executor(None, knowledge_query, query),
             )
             for _ in range(MAX_TOOL_ROUNDS):
                 streamed: list[str] = []

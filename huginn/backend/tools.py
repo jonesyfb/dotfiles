@@ -369,8 +369,9 @@ async def _run_command(command: str, password_cb=None) -> str:
         password = await password_cb()
         if password is None:
             return "sudo: password prompt cancelled"
-        # -S reads from stdin; -p "" suppresses the prompt from polluting output
-        command = re.sub(r'\bsudo\b(?!\s+-S)', 'sudo -S -p ""', command, count=1)
+        # Normalise: ensure exactly one -S -p "" after sudo
+        # Remove any pre-existing -S/-p flags to avoid duplication, then re-add
+        command = re.sub(r'\bsudo\b(\s+-S)?(\s+-p\s+\S+)?', 'sudo -S -p ""', command, count=1)
         stdin_data = (password + "\n").encode()
 
     try:
