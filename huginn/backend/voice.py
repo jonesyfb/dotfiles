@@ -1,20 +1,24 @@
 """
-Huginn Voice — STT via faster-whisper, TTS via piper binary.
+Huginn Voice — STT via faster-whisper, TTS via piper + sox crow chain.
 
 Setup:
   uv add faster-whisper          (STT)
-  yay -S piper-tts-bin           (TTS binary)
-  # Download a Piper voice:
+  yay -S piper-tts-bin sox       (TTS binary + audio effects)
+  # Download ryan-high voice:
   mkdir -p ~/.local/share/piper
   cd ~/.local/share/piper
-  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx
-  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/lessac/medium/en_US-lessac-medium.onnx.json
+  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx
+  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx.json
 """
 import asyncio
 import shlex
+import shutil
 from pathlib import Path
 
 from config import Config
+
+# sox chain: pitch down 3 semitones, light reverb, slight overdrive
+_SOX_EFFECTS = "pitch -300 reverb 25 overdrive 12"
 
 
 class VoiceEngine:
@@ -49,13 +53,28 @@ class VoiceEngine:
     async def speak(self, text: str) -> None:
         model_path = Config.piper_model
         if not Path(model_path).exists():
-            print(f"Piper model not found: {model_path}", flush=True)
-            return
-        cmd = (
-            f"echo {shlex.quote(text)} | "
-            f"piper-tts --model {shlex.quote(model_path)} --output_raw | "
-            f"aplay -r 22050 -f S16_LE -c 1 -q"
-        )
+            # Fallback to lessac if ryan not yet downloaded
+            fallback = str(Path.home() / ".local/share/piper/en_US-lessac-medium.onnx")
+            if Path(fallback).exists():
+                model_path = fallback
+                print("ryan-high not found, falling back to lessac-medium", flush=True)
+            else:
+                print(f"Piper model not found: {model_path}", flush=True)
+                return
+
+        piper_cmd = f"echo {shlex.quote(text)} | piper-tts --model {shlex.quote(model_path)} --output_raw"
+
+        if shutil.which("sox"):
+            raw_fmt = "-t raw -r 22050 -e signed-integer -b 16 -c 1"
+            cmd = (
+                f"{piper_cmd} | "
+                f"sox {raw_fmt} - {raw_fmt} - {_SOX_EFFECTS} | "
+                f"aplay -r 22050 -f S16_LE -c 1 -q"
+            )
+        else:
+            print("sox not found — using raw piper output (install sox for crow voice)", flush=True)
+            cmd = f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
+
         proc = await asyncio.create_subprocess_shell(
             cmd,
             stdout=asyncio.subprocess.DEVNULL,

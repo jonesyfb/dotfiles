@@ -22,5 +22,5 @@ class Config:
     # Voice
     whisper_model  = "base.en"
     whisper_device = "auto"
-    piper_model    = str(Path.home() / ".local/share/piper/en_US-lessac-medium.onnx")
+    piper_model    = str(Path.home() / ".local/share/piper/en_US-ryan-high.onnx")
     tts_enabled    = True
