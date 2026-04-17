@@ -52,20 +52,21 @@ class VoiceEngine:
         return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
 
     async def speak(self, text: str) -> None:
-        model_path = Config.piper_model
-        if not Path(model_path).exists():
-            # Fallback to lessac if ryan not yet downloaded
+        model_path  = Config.piper_model
+        use_effects = Path(model_path).exists()  # only apply sox to the intended model
+
+        if not use_effects:
             fallback = str(Path.home() / ".local/share/piper/en_US-lessac-medium.onnx")
             if Path(fallback).exists():
                 model_path = fallback
-                print("ryan-high not found, falling back to lessac-medium", flush=True)
+                print("ryan-high not found, falling back to lessac-medium (no fx)", flush=True)
             else:
                 print(f"Piper model not found: {model_path}", flush=True)
                 return
 
         piper_cmd = f"echo {shlex.quote(text)} | piper-tts --model {shlex.quote(model_path)} --output_raw"
 
-        if shutil.which("sox"):
+        if use_effects and shutil.which("sox"):
             raw_fmt = "-t raw -r 22050 -e signed-integer -b 16 -c 1"
             cmd = (
                 f"{piper_cmd} | "
@@ -73,7 +74,6 @@ class VoiceEngine:
                 f"aplay -r 22050 -f S16_LE -c 1 -q"
             )
         else:
-            print("sox not found — using raw piper output (install sox for crow voice)", flush=True)
             cmd = f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
 
         proc = await asyncio.create_subprocess_shell(
