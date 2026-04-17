@@ -30,10 +30,8 @@ class HuginnDaemon:
         self.history:          list[dict]                       = load_recent_history()
         self.voice             = VoiceEngine()
         self.profile           = PROFILES[Config.default_profile]
-        self._pending_confirms:  dict[str, asyncio.Event] = {}
-        self._confirm_results:   dict[str, bool]          = {}
-        self._pending_passwords: dict[str, asyncio.Event] = {}
-        self._password_values:   dict[str, str]           = {}
+        self._pending_confirms: dict[str, asyncio.Event] = {}
+        self._confirm_results:  dict[str, bool]          = {}
         print(f"Loaded {len(self.history)} messages from history.", flush=True)
         self._boot_index()
 
@@ -102,13 +100,6 @@ class HuginnDaemon:
                     self._confirm_results[confirm_id] = approved
                     self._pending_confirms[confirm_id].set()
                 await self._send(writer, {"type": "confirm_ack"})
-            case "password_submit":
-                pwd_id   = msg.get("id", "")
-                password = msg.get("password")  # None if key missing, "" if cancelled
-                if pwd_id in self._pending_passwords:
-                    self._password_values[pwd_id] = password  # None = cancelled
-                    self._pending_passwords[pwd_id].set()
-                await self._send(writer, {"type": "password_ack"})
             case "switch_model":
                 profile_name = msg.get("profile", "")
                 await self._handle_switch_model(profile_name, writer)
@@ -131,19 +122,6 @@ class HuginnDaemon:
                 })
             case _:
                 await self._send(writer, {"type": "error", "message": "Unknown message type"})
-
-    async def _request_password(self, writer: asyncio.StreamWriter, pwd_id: str) -> str | None:
-        event = asyncio.Event()
-        self._pending_passwords[pwd_id] = event
-        await self._send(writer, {"type": "password_required", "id": pwd_id})
-        try:
-            await asyncio.wait_for(event.wait(), timeout=60)
-            pwd = self._password_values.pop(pwd_id, None)
-            return pwd if pwd else None  # treat empty string as cancel
-        except asyncio.TimeoutError:
-            return None
-        finally:
-            self._pending_passwords.pop(pwd_id, None)
 
     async def _handle_switch_model(self, profile_name: str, writer: asyncio.StreamWriter) -> None:
         if profile_name not in PROFILES:
@@ -248,9 +226,7 @@ class HuginnDaemon:
                             continue
 
                     await self._send(writer, {"type": "tool_call", "tool": tool_name, "args": tool_args})
-                    pwd_id       = f"pwd_{tool_name}_{id(tool_args)}"
-                    password_cb  = lambda _id=pwd_id: self._request_password(writer, _id)
-                    result = await execute_tool(tool_name, tool_args, password_cb=password_cb)
+                    result = await execute_tool(tool_name, tool_args)
                     await self._send(writer, {"type": "tool_result", "tool": tool_name, "output": result})
                     self.history.append({"role": "tool", "content": result})
                     save_message("tool", result)

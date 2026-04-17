@@ -25,10 +25,11 @@ def main() -> None:
         confirm_id = sys.argv[2] if len(sys.argv) > 2 else ""
         approved   = sys.argv[3] == "true" if len(sys.argv) > 3 else False
         payload: dict = {"type": "confirm", "id": confirm_id, "approved": approved}
-    elif msg_type == "password_submit":
-        pwd_id   = sys.argv[2] if len(sys.argv) > 2 else ""
-        password = sys.argv[3] if len(sys.argv) > 3 else ""
-        payload: dict = {"type": "password_submit", "id": pwd_id, "password": password}
+    elif msg_type == "image_file":
+        path    = sys.argv[2] if len(sys.argv) > 2 else ""
+        caption = sys.argv[3] if len(sys.argv) > 3 else ""
+        tts     = sys.argv[4] == "true" if len(sys.argv) > 4 else False
+        payload: dict = {"type": "image_file", "path": path, "caption": caption, "tts": tts}
     elif msg_type == "switch_model":
         profile = sys.argv[2] if len(sys.argv) > 2 else ""
         payload: dict = {"type": "switch_model", "profile": profile}
@@ -61,7 +62,7 @@ def main() -> None:
                     print(line, flush=True)
                     try:
                         obj = json.loads(line)
-                        if obj.get("type") in ("done", "cleared", "pong", "error", "confirm_ack", "password_ack", "model_switched"):
+                        if obj.get("type") in ("done", "cleared", "pong", "error", "confirm_ack", "model_switched"):
                             return
                     except json.JSONDecodeError:
                         pass

@@ -332,10 +332,10 @@ TOOL_DEFINITIONS = [
 
 # ── Tool implementations ──────────────────────────────────────────────────────
 
-async def execute_tool(name: str, args: dict, password_cb=None) -> str:
+async def execute_tool(name: str, args: dict) -> str:
     try:
         match name:
-            case "run_command":    return await _run_command(args["command"], password_cb)
+            case "run_command":    return await _run_command(args["command"])
             case "read_file":      return await _read_file(args["path"])
             case "write_file":     return await _write_file(args["path"], args["content"])
             case "media_control":  return await _media_control(args["action"])
@@ -358,30 +358,25 @@ async def execute_tool(name: str, args: dict, password_cb=None) -> str:
         return f"Tool error: {e}"
 
 
-async def _run_command(command: str, password_cb=None) -> str:
-    import re
-    needs_sudo = bool(re.search(r'\bsudo\b', command))
+_ASKPASS = Path(__file__).parent.parent / "scripts" / "huginn-askpass.sh"
 
-    stdin_data: bytes | None = None
-    if needs_sudo:
-        if password_cb is None:
-            return "sudo: password required but no prompt available (daemon has no active frontend connection)"
-        password = await password_cb()
-        if password is None:
-            return "sudo: password prompt cancelled"
-        # Normalise: ensure exactly one -S -p "" after sudo
-        # Remove any pre-existing -S/-p flags to avoid duplication, then re-add
-        command = re.sub(r'\bsudo\b(\s+-S)?(\s+-p\s+\S+)?', 'sudo -S -p ""', command, count=1)
-        stdin_data = (password + "\n").encode()
+
+async def _run_command(command: str) -> str:
+    import re, os
+    env = None
+    if re.search(r'\bsudo\b', command) and _ASKPASS.exists():
+        # Use fuzzel askpass instead of stdin piping; sudo -A triggers SUDO_ASKPASS
+        command = re.sub(r'\bsudo\b(\s+-[AS])?', 'sudo -A', command, count=1)
+        env = {**os.environ, "SUDO_ASKPASS": str(_ASKPASS)}
 
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
-            stdin=asyncio.subprocess.PIPE if stdin_data else None,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            env=env,
         )
-        output, _ = await asyncio.wait_for(proc.communicate(input=stdin_data), timeout=30)
+        output, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
         result = output.decode(errors="replace").strip()
         return result[:3000] if result else "(no output)"
     except asyncio.TimeoutError:
