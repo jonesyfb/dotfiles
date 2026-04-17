@@ -17,9 +17,8 @@ from pathlib import Path
 
 from config import Config
 
-# sox chain: pitch down 2 semitones, subtle reverb, low-pass warmth, slight overdrive
-# reverb args: reverberance% hf-damping% room-scale% stereo-depth% pre-delay wet-only
-_SOX_EFFECTS = "pitch -200 reverb 15 80 40 0 0 0 overdrive 8 bass +3"
+# Crow voice chain: pitch up into crow range, cut bass, boost treble, hard overdrive for scratchiness
+_SOX_EFFECTS = "pitch +400 bass -8 treble +7 overdrive 28"
 
 
 class VoiceEngine:
