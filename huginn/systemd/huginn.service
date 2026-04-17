@@ -1,0 +1,15 @@
+[Unit]
+Description=Huginn AI Thought Assistant Daemon
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/.local/share/huginn
+ExecStart=uv run --project %h/dotfiles/huginn python3 %h/dotfiles/huginn/backend/daemon.py
+Restart=on-failure
+RestartSec=3
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target
