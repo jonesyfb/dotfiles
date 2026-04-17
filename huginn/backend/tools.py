@@ -35,6 +35,8 @@ TOOL_TRUST: dict[str, str] = {
     "screenshot":      "auto",
     "switch_model":    "auto",
     "switch_theme":    "auto",
+    "weather":         "auto",
+    "news":            "auto",
 }
 
 # ── Tool definitions (Ollama/OpenAI function calling schema) ──────────────────
@@ -307,6 +309,48 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "weather",
+            "description": "Get current weather and forecast for a location. Defaults to current location.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "City name or location (omit for current location)",
+                    }
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "news",
+            "description": (
+                "Fetch latest tech/Linux news headlines from RSS feeds. "
+                "Sources: Phoronix (Linux/hardware), Hacker News top stories, Ars Technica Tech."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "source": {
+                        "type": "string",
+                        "enum": ["all", "phoronix", "hackernews", "arstechnica"],
+                        "description": "News source (default: all)",
+                    },
+                    "count": {
+                        "type": "integer",
+                        "description": "Number of headlines (default 8, max 20)",
+                    },
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "switch_theme",
             "description": (
                 "Switch the Huginn desktop theme. Changes accent colors across "
@@ -349,6 +393,8 @@ async def execute_tool(name: str, args: dict) -> str:
             case "niri_action":    return await _niri_action(args["command"])
             case "web_search":     return await _web_search(args["query"], int(args.get("results", 5)))
             case "screenshot":     return await _screenshot(args.get("question", "Describe what's on screen."))
+            case "weather":        return await _weather(args.get("location", ""))
+            case "news":           return await _news(args.get("source", "all"), int(args.get("count", 8)))
             case "switch_model":   return await _switch_model(args["profile"])
             case "switch_theme":   return await _switch_theme(args["theme"])
             case _:                return f"Unknown tool: {name}"
@@ -585,3 +631,43 @@ async def _switch_theme(theme: str) -> str:
         f"python3 ~/dotfiles/huginn/backend/theme.py {theme}"
     )
     return result
+
+
+async def _weather(location: str = "") -> str:
+    loc = location.strip().replace(" ", "+") or ""
+    url = f"https://wttr.in/{loc}?format=4"
+    try:
+        async with httpx.AsyncClient(timeout=10) as client:
+            resp = await client.get(url, headers={"User-Agent": "curl/7.0"})
+            return resp.text.strip()
+    except Exception as e:
+        return f"Weather unavailable: {e}"
+
+
+_RSS_FEEDS = {
+    "phoronix":    "https://www.phoronix.com/rss.php",
+    "hackernews":  "https://news.ycombinator.com/rss",
+    "arstechnica": "https://feeds.arstechnica.com/arstechnica/technology-lab",
+}
+
+async def _news(source: str = "all", count: int = 8) -> str:
+    import xml.etree.ElementTree as ET
+    count = min(count, 20)
+    feeds = list(_RSS_FEEDS.items()) if source == "all" else [(source, _RSS_FEEDS[source])]
+    per_feed = max(1, count // len(feeds))
+    lines: list[str] = []
+
+    async with httpx.AsyncClient(timeout=15) as client:
+        for name, url in feeds:
+            try:
+                resp = await client.get(url, headers={"User-Agent": "curl/7.0"}, follow_redirects=True)
+                root = ET.fromstring(resp.text)
+                items = root.findall(".//item")[:per_feed]
+                for item in items:
+                    title = (item.findtext("title") or "").strip()
+                    link  = (item.findtext("link")  or "").strip()
+                    lines.append(f"[{name}] {title}\n  {link}")
+            except Exception as e:
+                lines.append(f"[{name}] fetch error: {e}")
+
+    return "\n\n".join(lines) if lines else "No news fetched."
