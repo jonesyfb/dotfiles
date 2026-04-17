@@ -62,7 +62,12 @@ async def _stream_ollama(
     history: list, tools: list, system: str, model: str,
     on_event: EventCallback | None = None,
 ) -> dict:
-    messages = [{"role": "system", "content": system}] + history
+    messages = [{"role": "system", "content": system}]
+    for msg in history:
+        m = {"role": msg["role"], "content": msg.get("content", "")}
+        if msg.get("image_b64"):
+            m["images"] = [msg["image_b64"]]
+        messages.append(m)
 
     # Think-block state machine: initial → in_think → streaming
     state   = "initial"
@@ -159,8 +164,21 @@ def _history_to_claude(history: list) -> list:
         role = msg["role"]
 
         if role in ("user",):
-            content = msg.get("content", "")
-            if content:
+            content   = msg.get("content", "")
+            image_b64 = msg.get("image_b64")
+            if image_b64:
+                blocks: list = [{
+                    "type": "image",
+                    "source": {
+                        "type":       "base64",
+                        "media_type": msg.get("image_type", "image/png"),
+                        "data":       image_b64,
+                    },
+                }]
+                if content:
+                    blocks.append({"type": "text", "text": content})
+                messages.append({"role": "user", "content": blocks})
+            elif content:
                 messages.append({"role": "user", "content": content})
             i += 1
 
