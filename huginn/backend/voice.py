@@ -13,12 +13,16 @@ Setup:
 import asyncio
 import shlex
 import shutil
+import tempfile
 from pathlib import Path
 
 from config import Config
 
-# Crow voice: slight pitch up, scratchy overdrive, treble boost, gain normalize
-_SOX_EFFECTS = "pitch +200 bass -5 treble +5 overdrive 18 gain -4"
+# Voice processing: pitch up, scratchiness, EQ — applied to ryan-high only
+_SOX_EFFECTS  = "pitch +200 bass -5 treble +5 overdrive 15 gain -4"
+# Crow texture sample: looped under the TTS at low volume for that caw quality
+_CROW_SAMPLE  = Path.home() / ".local/share/huginn" / "crow.wav"
+_CROW_MIX_VOL = 0.12
 
 
 class VoiceEngine:
@@ -64,14 +68,17 @@ class VoiceEngine:
                 return
 
         piper_cmd = f"echo {shlex.quote(text)} | piper-tts --model {shlex.quote(model_path)} --output_raw"
+        raw_fmt   = "-t raw -r 22050 -e signed-integer -b 16 -c 1"
 
         if use_effects and shutil.which("sox"):
-            raw_fmt = "-t raw -r 22050 -e signed-integer -b 16 -c 1"
-            cmd = (
-                f"{piper_cmd} | "
-                f"sox {raw_fmt} - {raw_fmt} - {_SOX_EFFECTS} | "
-                f"aplay -r 22050 -f S16_LE -c 1 -q"
-            )
+            if _CROW_SAMPLE.exists():
+                cmd = await self._build_crow_mix_cmd(piper_cmd, raw_fmt)
+            else:
+                cmd = (
+                    f"{piper_cmd} | "
+                    f"sox {raw_fmt} - {raw_fmt} - {_SOX_EFFECTS} | "
+                    f"aplay -r 22050 -f S16_LE -c 1 -q"
+                )
         else:
             cmd = f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
 
@@ -83,3 +90,35 @@ class VoiceEngine:
         _, err = await proc.communicate()
         if proc.returncode != 0 and err:
             print(f"TTS error: {err.decode().strip()}", flush=True)
+
+    async def _build_crow_mix_cmd(self, piper_cmd: str, raw_fmt: str) -> str:
+        """Render TTS to temp WAV, mix with crow sample looped to match duration."""
+        tmp = tempfile.mktemp(suffix=".wav", prefix="/tmp/huginn-tts-")
+        crow = shlex.quote(str(_CROW_SAMPLE))
+        vol  = _CROW_MIX_VOL
+
+        # Render processed TTS to temp file
+        render = (
+            f"{piper_cmd} | "
+            f"sox {raw_fmt} - {shlex.quote(tmp)} {_SOX_EFFECTS}"
+        )
+        proc = await asyncio.create_subprocess_shell(render, stderr=asyncio.subprocess.PIPE)
+        _, err = await proc.communicate()
+        if proc.returncode != 0 or not Path(tmp).exists():
+            print(f"TTS render error: {err.decode().strip()}", flush=True)
+            return f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
+
+        # Get duration so crow loop can be trimmed to match
+        dur_proc = await asyncio.create_subprocess_shell(
+            f"soxi -D {shlex.quote(tmp)}",
+            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
+        )
+        dur_out, _ = await dur_proc.communicate()
+        dur = dur_out.decode().strip() or "10"
+
+        # Mix: TTS + crow looped+trimmed at low volume, then play and clean up
+        crow_stream = f"|sox {crow} -t wav - repeat 99 trim 0 {dur} vol {vol}"
+        return (
+            f"sox -m {shlex.quote(tmp)} {shlex.quote(crow_stream)} -t wav - | "
+            f"aplay -q ; rm -f {shlex.quote(tmp)}"
+        )
