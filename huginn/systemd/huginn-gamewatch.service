@@ -1,0 +1,14 @@
+[Unit]
+Description=Huginn game mode watcher — pauses AI when Overwatch is running
+After=huginn.service
+
+[Service]
+Type=simple
+ExecStart=%h/dotfiles/huginn/scripts/huginn-gamewatch.sh
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=default.target

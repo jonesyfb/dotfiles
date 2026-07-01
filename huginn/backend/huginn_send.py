@@ -30,6 +30,11 @@ def main() -> None:
         caption = sys.argv[3] if len(sys.argv) > 3 else ""
         tts     = sys.argv[4] == "true" if len(sys.argv) > 4 else False
         payload: dict = {"type": "image_file", "path": path, "caption": caption, "tts": tts}
+    elif msg_type == "bash_event":
+        exit_code = int(sys.argv[2]) if len(sys.argv) > 2 else 0
+        elapsed   = float(sys.argv[3]) if len(sys.argv) > 3 else 0
+        cmd       = " ".join(sys.argv[4:]) if len(sys.argv) > 4 else ""
+        payload: dict = {"type": "bash_event", "exit_code": exit_code, "elapsed": elapsed, "cmd": cmd}
     elif msg_type == "switch_model":
         profile = sys.argv[2] if len(sys.argv) > 2 else ""
         payload: dict = {"type": "switch_model", "profile": profile}
@@ -62,7 +67,7 @@ def main() -> None:
                     print(line, flush=True)
                     try:
                         obj = json.loads(line)
-                        if obj.get("type") in ("done", "cleared", "pong", "error", "confirm_ack", "model_switched"):
+                        if obj.get("type") in ("done", "cleared", "recovered", "pong", "error", "confirm_ack", "model_switched"):
                             return
                     except json.JSONDecodeError:
                         pass

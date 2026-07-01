@@ -35,6 +35,7 @@ def apply_theme(slug: str) -> None:
     apply_kitty(theme)
     apply_niri(theme)
     apply_vim(theme)
+    apply_fuzzel(theme)
 
     print(f"ᚱ Theme switched: {theme['name']}")
 
@@ -107,6 +108,30 @@ def apply_niri(theme: dict) -> None:
                        capture_output=True, timeout=5)
     except (subprocess.TimeoutExpired, FileNotFoundError):
         pass
+
+
+def apply_fuzzel(theme: dict) -> None:
+    fuzzel_config = Path.home() / ".config" / "fuzzel" / "fuzzel.ini"
+    if not fuzzel_config.exists():
+        return
+
+    def hex_(color: str) -> str:
+        return color.lstrip("#")
+
+    new_colors = "\n".join([
+        "[colors]",
+        f"background={hex_(theme['bg'])}ef",
+        f"text={hex_(theme['text_primary'])}ff",
+        f"match={hex_(theme['accent'])}ff",
+        f"selection={hex_(theme['surface'])}ff",
+        f"selection-text={hex_(theme['text_primary'])}ff",
+        f"selection-match={hex_(theme['cyan'])}ff",
+        f"border={hex_(theme['accent'])}ff",
+    ])
+
+    content = fuzzel_config.read_text()
+    content = re.sub(r'\[colors\].*?(?=\[|\Z)', new_colors + "\n\n", content, flags=re.S)
+    fuzzel_config.write_text(content)
 
 
 def apply_vim(theme: dict) -> None:

@@ -36,6 +36,13 @@ def init_db() -> None:
                 value      TEXT NOT NULL,
                 updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
             );
+            CREATE TABLE IF NOT EXISTS alerts (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                key        TEXT NOT NULL,
+                message    TEXT NOT NULL,
+                value      INTEGER,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
         """)
 
 
@@ -76,6 +83,23 @@ def load_memories() -> dict[str, str]:
     with _connect() as conn:
         rows = conn.execute("SELECT key, value FROM memories ORDER BY key").fetchall()
     return {r["key"]: r["value"] for r in rows}
+
+
+def log_alert(key: str, message: str, value: int | None = None) -> None:
+    with _connect() as conn:
+        conn.execute(
+            "INSERT INTO alerts (key, message, value) VALUES (?, ?, ?)",
+            (key, message, value),
+        )
+
+
+def load_alerts(limit: int = 20) -> list[dict]:
+    with _connect() as conn:
+        rows = conn.execute(
+            "SELECT key, message, value, created_at FROM alerts ORDER BY id DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 def forget_memory(key: str) -> bool:

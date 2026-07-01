@@ -19,8 +19,19 @@ class Config:
     data_dir         = Path.home() / ".local/share/huginn"
     socket_path      = data_dir / "huginn.sock"
 
+    # Weather monitoring (empty = auto-detect by IP, or set e.g. "Minneapolis,MN")
+    weather_location = "Joplin,MO"
+
+    # Daily briefing (24h format, e.g. "08:00")
+    briefing_time = "08:00"
+
+    # Radicale CalDAV
+    caldav_url      = "https://calendar.poopenfarten.com/nate/3a375a1d-cea8-6085-146d-5aeb97d0480d/"
+    caldav_user     = "nate"
+    caldav_password = "2842021"
+
     # Voice
     whisper_model  = "base.en"
     whisper_device = "auto"
     piper_model    = str(Path.home() / ".local/share/piper/en_US-ryan-high.onnx")
-    tts_enabled    = True
+    tts_enabled    = False

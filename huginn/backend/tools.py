@@ -37,6 +37,12 @@ TOOL_TRUST: dict[str, str] = {
     "switch_theme":    "auto",
     "weather":         "auto",
     "news":            "auto",
+    "remind":          "auto",
+    "alert_history":   "auto",
+    "calendar_list":   "auto",
+    "calendar_add":    "confirm",
+    "calendar_update": "confirm",
+    "calendar_delete": "confirm",
 }
 
 # ── Tool definitions (Ollama/OpenAI function calling schema) ──────────────────
@@ -67,11 +73,16 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "read_file",
-            "description": "Read the contents of a file. Use ~ for home directory.",
+            "description": (
+                "Read the contents of a file. Use ~ for home directory. "
+                "For large files, use offset and limit to read in chunks (line numbers, 1-based)."
+            ),
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "File path to read"}
+                    "path":   {"type": "string",  "description": "File path to read"},
+                    "offset": {"type": "integer", "description": "Start at this line number (1-based, default 1)"},
+                    "limit":  {"type": "integer", "description": "Max lines to return (default 200)"},
                 },
                 "required": ["path"],
             },
@@ -351,6 +362,38 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "remind",
+            "description": (
+                "Set a reminder that fires after a delay. Huginn will send a desktop "
+                "notification and speak the message aloud at the specified time."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "message": {"type": "string", "description": "What to remind the user about"},
+                    "minutes": {"type": "number",  "description": "How many minutes from now (can be fractional)"},
+                },
+                "required": ["message", "minutes"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "alert_history",
+            "description": "Show recent proactive system alerts (CPU temp, disk, memory warnings) that Huginn has fired.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "limit": {"type": "integer", "description": "Number of alerts to return (default 10)"},
+                },
+                "required": [],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "switch_theme",
             "description": (
                 "Switch the Huginn desktop theme. Changes accent colors across "
@@ -371,6 +414,70 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_list",
+            "description": "List upcoming calendar events from Radicale. Returns events with their UIDs (needed for update/delete).",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "days": {"type": "integer", "description": "How many days ahead to fetch (default 7)"},
+                },
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_add",
+            "description": "Add a new event to the calendar.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "title":       {"type": "string", "description": "Event title/summary"},
+                    "start":       {"type": "string", "description": "Start datetime in ISO 8601 format (e.g. '2026-04-21T14:00:00') or date only for all-day ('2026-04-21')"},
+                    "end":         {"type": "string", "description": "End datetime in ISO 8601 format, or date only for all-day"},
+                    "description": {"type": "string", "description": "Optional event description"},
+                    "location":    {"type": "string", "description": "Optional location"},
+                },
+                "required": ["title", "start", "end"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_update",
+            "description": "Update an existing calendar event by UID. Only provide fields to change.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid":         {"type": "string", "description": "Event UID from calendar_list"},
+                    "title":       {"type": "string"},
+                    "start":       {"type": "string", "description": "ISO 8601 datetime or date"},
+                    "end":         {"type": "string", "description": "ISO 8601 datetime or date"},
+                    "description": {"type": "string"},
+                    "location":    {"type": "string"},
+                },
+                "required": ["uid"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "calendar_delete",
+            "description": "Delete a calendar event by UID.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "uid": {"type": "string", "description": "Event UID from calendar_list"},
+                },
+                "required": ["uid"],
+            },
+        },
+    },
 ]
 
 
@@ -380,7 +487,7 @@ async def execute_tool(name: str, args: dict) -> str:
     try:
         match name:
             case "run_command":    return await _run_command(args["command"])
-            case "read_file":      return await _read_file(args["path"])
+            case "read_file":      return await _read_file(args["path"], args.get("offset", 1), args.get("limit", 200))
             case "write_file":     return await _write_file(args["path"], args["content"])
             case "media_control":  return await _media_control(args["action"])
             case "open_app":       return await _open_app(args["app"])
@@ -397,7 +504,13 @@ async def execute_tool(name: str, args: dict) -> str:
             case "news":           return await _news(args.get("source", "all"), int(args.get("count", 8)))
             case "switch_model":   return await _switch_model(args["profile"])
             case "switch_theme":   return await _switch_theme(args["theme"])
-            case _:                return f"Unknown tool: {name}"
+            case "remind":           return await _remind(args["message"], float(args["minutes"]))
+            case "alert_history":    return _alert_history(int(args.get("limit", 10)))
+            case "calendar_list":    return await _calendar_list(int(args.get("days", 7)))
+            case "calendar_add":     return await _calendar_add(args["title"], args["start"], args["end"], args.get("description", ""), args.get("location", ""))
+            case "calendar_update":  return await _calendar_update(args["uid"], args.get("title"), args.get("start"), args.get("end"), args.get("description"), args.get("location"))
+            case "calendar_delete":  return await _calendar_delete(args["uid"])
+            case _:                  return f"Unknown tool: {name}"
     except KeyError as e:
         return f"Missing required argument: {e}"
     except Exception as e:
@@ -406,33 +519,55 @@ async def execute_tool(name: str, args: dict) -> str:
 
 _ASKPASS = Path(__file__).parent.parent / "scripts" / "huginn-askpass.sh"
 
+# Package managers that need --noconfirm/-y for install/remove/upgrade ops
+_PKG_NONINTERACTIVE = {
+    r'\b(pacman|yay|paru)\b': '--noconfirm',
+    r'\bapt(-get)?\b':        '-y',
+    r'\bdnf\b':               '-y',
+}
+
 
 async def _run_command(command: str) -> str:
     import re, os
     env = None
+
+    # Inject non-interactive flags for package managers doing installs/upgrades
+    for pattern, flag in _PKG_NONINTERACTIVE.items():
+        if re.search(pattern, command) and flag not in command:
+            if re.search(r'\s-[SRUuy]', command):  # install/remove/upgrade ops
+                command = command.rstrip() + f" {flag}"
+
     if re.search(r'\bsudo\b', command) and _ASKPASS.exists():
-        # Use fuzzel askpass instead of stdin piping; sudo -A triggers SUDO_ASKPASS
         command = re.sub(r'\bsudo\b(\s+-[AS])?', 'sudo -A', command, count=1)
         env = {**os.environ, "SUDO_ASKPASS": str(_ASKPASS)}
+
+    # Longer timeout for package manager ops
+    is_pkg = any(re.search(p, command) for p in _PKG_NONINTERACTIVE)
+    timeout = 300 if is_pkg else 30
 
     try:
         proc = await asyncio.create_subprocess_shell(
             command,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.STDOUT,
+            stdin=asyncio.subprocess.DEVNULL,
             env=env,
         )
-        output, _ = await asyncio.wait_for(proc.communicate(), timeout=30)
+        output, _ = await asyncio.wait_for(proc.communicate(), timeout=timeout)
         result = output.decode(errors="replace").strip()
         return result[:3000] if result else "(no output)"
     except asyncio.TimeoutError:
-        return "Command timed out after 30s"
+        return f"Command timed out after {timeout}s"
 
 
-async def _read_file(path: str) -> str:
+async def _read_file(path: str, offset: int = 1, limit: int = 200) -> str:
     try:
-        content = Path(path).expanduser().read_text(errors="replace")
-        return content[:5000] if len(content) > 5000 else content
+        lines = Path(path).expanduser().read_text(errors="replace").splitlines()
+        total = len(lines)
+        start = max(0, offset - 1)
+        chunk = lines[start:start + limit]
+        header = f"[lines {start+1}-{start+len(chunk)} of {total}]\n"
+        return header + "\n".join(chunk)
     except FileNotFoundError:
         return f"File not found: {path}"
     except PermissionError:
@@ -530,11 +665,12 @@ def _forget(key: str) -> str:
 
 
 async def _notify(title: str, message: str, urgency: str = "normal") -> str:
+    ntype = "warn" if urgency == "critical" else "ok" if urgency == "low" else "info"
     try:
-        subprocess.run(["notify-send", "-u", urgency, title, message], timeout=5)
+        subprocess.run(["huginn-notify", "--type", ntype, "--title", title, "--body", message], timeout=5)
         return f"Notification sent: {title}"
     except FileNotFoundError:
-        return "notify-send not found — install libnotify"
+        return "huginn-notify not found"
 
 
 async def _niri_action(command: str) -> str:
@@ -650,6 +786,41 @@ _RSS_FEEDS = {
     "arstechnica": "https://feeds.arstechnica.com/arstechnica/technology-lab",
 }
 
+async def _remind(message: str, minutes: float) -> str:
+    import shlex as _shlex
+    seconds = max(5, minutes * 60)
+
+    async def _fire():
+        await asyncio.sleep(seconds)
+        title = "ᚱ Huginn — Reminder"
+        try:
+            subprocess.run(["huginn-notify", "--type", "info", "--title", title, "--body", message], timeout=5)
+        except Exception:
+            pass
+        # Speak via voice engine if available
+        try:
+            from voice import VoiceEngine
+            await VoiceEngine().speak(message)
+        except Exception:
+            pass
+
+    asyncio.create_task(_fire())
+    mins_str = f"{minutes:g} minute{'s' if minutes != 1 else ''}"
+    return f"Reminder set for {mins_str} from now: {message}"
+
+
+def _alert_history(limit: int = 10) -> str:
+    from memory import load_alerts
+    alerts = load_alerts(limit)
+    if not alerts:
+        return "No system alerts on record."
+    lines = []
+    for a in alerts:
+        val = f" ({a['value']})" if a["value"] is not None else ""
+        lines.append(f"[{a['created_at']}] {a['key']}{val}: {a['message']}")
+    return "\n".join(lines)
+
+
 async def _news(source: str = "all", count: int = 8) -> str:
     import xml.etree.ElementTree as ET
     count = min(count, 20)
@@ -671,3 +842,124 @@ async def _news(source: str = "all", count: int = 8) -> str:
                 lines.append(f"[{name}] fetch error: {e}")
 
     return "\n\n".join(lines) if lines else "No news fetched."
+
+
+# ── Calendar (Radicale CalDAV) ────────────────────────────────────────────────
+
+def _caldav_client():
+    import caldav
+    return caldav.DAVClient(
+        url=Config.caldav_url,
+        username=Config.caldav_user,
+        password=Config.caldav_password,
+    )
+
+
+async def _calendar_list(days: int = 7) -> str:
+    import datetime, caldav
+    from zoneinfo import ZoneInfo
+    loop = asyncio.get_event_loop()
+
+    def _fetch():
+        client = _caldav_client()
+        cal = client.calendar(url=Config.caldav_url)
+        now   = datetime.datetime.now(tz=datetime.timezone.utc)
+        end   = now + datetime.timedelta(days=days)
+        events = cal.search(start=now, end=end, event=True, expand=True)
+        lines = []
+        for ev in events:
+            c = ev.icalendar_component
+            uid     = str(c.get("UID", ""))
+            summary = str(c.get("SUMMARY", "(no title)"))
+            dtstart = c.get("DTSTART")
+            dtend   = c.get("DTEND")
+            loc     = str(c.get("LOCATION", ""))
+            desc    = str(c.get("DESCRIPTION", ""))
+            start_s = dtstart.dt.isoformat() if dtstart else "?"
+            end_s   = dtend.dt.isoformat()   if dtend   else "?"
+            line = f"UID: {uid}\n  {summary}\n  {start_s} → {end_s}"
+            if loc:  line += f"\n  📍 {loc}"
+            if desc: line += f"\n  {desc[:120]}"
+            lines.append(line)
+        return "\n\n".join(lines) if lines else f"No events in the next {days} days."
+
+    return await loop.run_in_executor(None, _fetch)
+
+
+async def _calendar_add(title: str, start: str, end: str, description: str = "", location: str = "") -> str:
+    import datetime, uuid, caldav
+    from icalendar import Calendar, Event
+
+    def _add():
+        client = _caldav_client()
+        cal    = client.calendar(url=Config.caldav_url)
+        ical   = Calendar()
+        ical.add("prodid", "-//Huginn//EN")
+        ical.add("version", "2.0")
+        ev = Event()
+        ev.add("uid",     str(uuid.uuid4()))
+        ev.add("summary", title)
+        ev.add("dtstart", _parse_dt(start))
+        ev.add("dtend",   _parse_dt(end))
+        if description: ev.add("description", description)
+        if location:    ev.add("location",    location)
+        ev.add("dtstamp", datetime.datetime.now(tz=datetime.timezone.utc))
+        ical.add_component(ev)
+        cal.add_event(ical.to_ical().decode())
+        return f"Event added: '{title}' on {start}"
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _add)
+
+
+async def _calendar_update(uid: str, title: str | None, start: str | None, end: str | None,
+                            description: str | None, location: str | None) -> str:
+    import caldav
+
+    def _update():
+        client = _caldav_client()
+        cal    = client.calendar(url=Config.caldav_url)
+        results = cal.search(event=True)
+        for ev in results:
+            c = ev.icalendar_component
+            if str(c.get("UID", "")) == uid:
+                if title:       c["SUMMARY"]     = title
+                if start:       c["DTSTART"].dt  = _parse_dt(start)
+                if end:         c["DTEND"].dt     = _parse_dt(end)
+                if description is not None: c["DESCRIPTION"] = description
+                if location    is not None: c["LOCATION"]    = location
+                ev.save()
+                return f"Event {uid} updated."
+        return f"Event {uid} not found."
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _update)
+
+
+async def _calendar_delete(uid: str) -> str:
+    import caldav
+
+    def _delete():
+        client = _caldav_client()
+        cal    = client.calendar(url=Config.caldav_url)
+        results = cal.search(event=True)
+        for ev in results:
+            if str(ev.icalendar_component.get("UID", "")) == uid:
+                ev.delete()
+                return f"Event {uid} deleted."
+        return f"Event {uid} not found."
+
+    loop = asyncio.get_event_loop()
+    return await loop.run_in_executor(None, _delete)
+
+
+def _parse_dt(s: str):
+    import datetime
+    from zoneinfo import ZoneInfo
+    s = s.strip()
+    if "T" in s:
+        dt = datetime.datetime.fromisoformat(s)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=datetime.datetime.now().astimezone().tzinfo)
+        return dt
+    return datetime.date.fromisoformat(s)

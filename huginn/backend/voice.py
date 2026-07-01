@@ -1,28 +1,28 @@
 """
-Huginn Voice — STT via faster-whisper, TTS via piper + sox crow chain.
+Huginn Voice — STT via faster-whisper, TTS via piper + ffmpeg.
 
 Setup:
-  uv add faster-whisper          (STT)
-  yay -S piper-tts-bin sox       (TTS binary + audio effects)
-  # Download ryan-high voice:
-  mkdir -p ~/.local/share/piper
-  cd ~/.local/share/piper
-  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx
-  wget https://huggingface.co/rhasspy/piper-voices/resolve/v1.0.0/en/en_US/ryan/high/en_US-ryan-high.onnx.json
+  uv add faster-whisper
+  yay -S piper-tts-bin ffmpeg
 """
 import asyncio
+import re
 import shlex
 import shutil
-import tempfile
 from pathlib import Path
 
 from config import Config
 
-# Voice processing: pitch up, scratchiness, EQ — applied to ryan-high only
-_SOX_EFFECTS  = "pitch +200 bass -5 treble +5 overdrive 15 gain -4"
-# Crow texture sample: looped under the TTS at low volume for that caw quality
-_CROW_SAMPLE  = Path.home() / ".local/share/huginn" / "crow.wav"
-_CROW_MIX_VOL = 0.12
+_RATE = 22050
+
+_FFMPEG_AF = (
+    "equalizer=f=80:width_type=o:width=1.5:g=5,"
+    "equalizer=f=2500:width_type=o:width=1.5:g=-3,"
+    "equalizer=f=6000:width_type=o:width=2:g=-5,"
+    "lowpass=f=7000,"
+    "aecho=0.8:0.5:45:0.10,"
+    "volume=1.3"
+)
 
 
 class VoiceEngine:
@@ -47,78 +47,69 @@ class VoiceEngine:
     def _transcribe_sync(self, audio_path: str) -> str:
         model = self._load_whisper()
         segments, _ = model.transcribe(audio_path, language="en", vad_filter=True)
-        text = " ".join(seg.text.strip() for seg in segments).strip()
-        return text or ""
+        return " ".join(seg.text.strip() for seg in segments).strip()
 
     async def transcribe(self, audio_path: str) -> str:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(None, self._transcribe_sync, audio_path)
 
+    @staticmethod
+    def _clean_for_tts(text: str) -> str:
+        # Markdown
+        text = re.sub(r'\*+|_+|`+|~+', '', text)
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+        # Currency
+        text = re.sub(r'\$(\d[\d,]*(?:\.\d+)?)', lambda m: m.group(1).replace(',', '') + ' dollars', text)
+        text = re.sub(r'£(\d[\d,]*(?:\.\d+)?)', lambda m: m.group(1).replace(',', '') + ' pounds', text)
+        text = re.sub(r'€(\d[\d,]*(?:\.\d+)?)', lambda m: m.group(1).replace(',', '') + ' euros', text)
+        # Percentages
+        text = re.sub(r'(\d+(?:\.\d+)?)%', r'\1 percent', text)
+        # Dates like 2024-04-17
+        text = re.sub(r'\b(\d{4})-(\d{2})-(\d{2})\b', r'\1 \2 \3', text)
+        # Remove leftover URLs
+        text = re.sub(r'https?://\S+', 'a link', text)
+        return re.sub(r'\s+', ' ', text).strip()
+
     async def speak(self, text: str) -> None:
+        if not Config.tts_enabled:
+            return
+        text = self._clean_for_tts(text)
+        if not text:
+            return
+
         model_path  = Config.piper_model
-        use_effects = Path(model_path).exists()  # only apply sox to the intended model
+        use_effects = Path(model_path).exists()
 
         if not use_effects:
-            fallback = str(Path.home() / ".local/share/piper/en_US-lessac-medium.onnx")
-            if Path(fallback).exists():
-                model_path = fallback
-                print("ryan-high not found, falling back to lessac-medium (no fx)", flush=True)
+            for fallback in [
+                str(Path.home() / ".local/share/piper/en_US-ryan-high.onnx"),
+                str(Path.home() / ".local/share/piper/en_US-lessac-medium.onnx"),
+            ]:
+                if Path(fallback).exists():
+                    model_path  = fallback
+                    use_effects = True
+                    print(f"Piper fallback: {Path(fallback).stem}", flush=True)
+                    break
             else:
-                print(f"Piper model not found: {model_path}", flush=True)
+                print("No piper model found.", flush=True)
                 return
 
         piper_cmd = f"echo {shlex.quote(text)} | piper-tts --model {shlex.quote(model_path)} --output_raw"
-        raw_fmt   = "-t raw -r 22050 -e signed-integer -b 16 -c 1"
 
-        if use_effects and shutil.which("sox"):
-            if _CROW_SAMPLE.exists():
-                cmd = await self._build_crow_mix_cmd(piper_cmd, raw_fmt)
-            else:
-                cmd = (
-                    f"{piper_cmd} | "
-                    f"sox {raw_fmt} - {raw_fmt} - {_SOX_EFFECTS} | "
-                    f"aplay -r 22050 -f S16_LE -c 1 -q"
-                )
+        if use_effects and shutil.which("ffmpeg"):
+            raw_in = f"-f s16le -ar {_RATE} -ac 1 -i pipe:0"
+            cmd = (
+                f"{piper_cmd} | "
+                f"ffmpeg -loglevel quiet {raw_in} -af {shlex.quote(_FFMPEG_AF)} -f wav pipe:1 | "
+                f"aplay -q"
+            )
         else:
-            cmd = f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
+            cmd = f"{piper_cmd} | aplay -r {_RATE} -f S16_LE -c 1 -q"
 
         proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.PIPE,
+            cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
         )
         _, err = await proc.communicate()
         if proc.returncode != 0 and err:
             print(f"TTS error: {err.decode().strip()}", flush=True)
-
-    async def _build_crow_mix_cmd(self, piper_cmd: str, raw_fmt: str) -> str:
-        """Render TTS to temp WAV, mix with crow sample looped to match duration."""
-        tmp = tempfile.mktemp(suffix=".wav", prefix="/tmp/huginn-tts-")
-        crow = shlex.quote(str(_CROW_SAMPLE))
-        vol  = _CROW_MIX_VOL
-
-        # Render processed TTS to temp file
-        render = (
-            f"{piper_cmd} | "
-            f"sox {raw_fmt} - {shlex.quote(tmp)} {_SOX_EFFECTS}"
-        )
-        proc = await asyncio.create_subprocess_shell(render, stderr=asyncio.subprocess.PIPE)
-        _, err = await proc.communicate()
-        if proc.returncode != 0 or not Path(tmp).exists():
-            print(f"TTS render error: {err.decode().strip()}", flush=True)
-            return f"{piper_cmd} | aplay -r 22050 -f S16_LE -c 1 -q"
-
-        # Get duration so crow loop can be trimmed to match
-        dur_proc = await asyncio.create_subprocess_shell(
-            f"soxi -D {shlex.quote(tmp)}",
-            stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.DEVNULL,
-        )
-        dur_out, _ = await dur_proc.communicate()
-        dur = dur_out.decode().strip() or "10"
-
-        # Mix: TTS + crow looped+trimmed at low volume, then play and clean up
-        crow_stream = f"|sox {crow} -t wav - repeat 99 trim 0 {dur} vol {vol}"
-        return (
-            f"sox -m {shlex.quote(tmp)} {shlex.quote(crow_stream)} -t wav - | "
-            f"aplay -q ; rm -f {shlex.quote(tmp)}"
-        )

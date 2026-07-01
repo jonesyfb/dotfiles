@@ -5,6 +5,7 @@ After=network.target
 [Service]
 Type=simple
 WorkingDirectory=%h/.local/share/huginn
+Environment="PATH=%h/.local/bin:/usr/local/bin:/usr/bin:/bin"
 ExecStart=uv run --project %h/dotfiles/huginn python3 %h/dotfiles/huginn/backend/daemon.py
 Restart=on-failure
 RestartSec=3

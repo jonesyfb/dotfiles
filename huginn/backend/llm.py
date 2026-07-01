@@ -1,8 +1,31 @@
+import asyncio
+import contextlib
+import fcntl
 import httpx
 import json
+from pathlib import Path
 from typing import AsyncGenerator, Awaitable, Callable
 
 from config import Config, PROFILES
+
+_OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
+GAME_MODE_FLAG    = Path.home() / ".local/share/huginn" / "game-mode"
+
+
+@contextlib.asynccontextmanager
+async def ollama_lock():
+    """Exclusive cross-process lock to prevent concurrent Ollama model loads."""
+    f = open(_OLLAMA_LOCK_PATH, "w")
+    await asyncio.to_thread(fcntl.flock, f.fileno(), fcntl.LOCK_EX)
+    try:
+        yield
+    finally:
+        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
+        f.close()
+
+
+def is_game_mode() -> bool:
+    return GAME_MODE_FLAG.exists()
 
 EventCallback = Callable[[str, str], Awaitable[None]]
 
@@ -36,12 +59,18 @@ computer — check media, open apps, read files, run commands, switch themes —
 MUST call the appropriate tool. Do NOT describe what you would do. Do NOT say \
 "let me check" and then not check. Call the tool immediately. If you're not sure \
 which tool, use run_command. Respond with text ONLY for questions that require no \
-computer action.\
+computer action.
+
+After any thinking/reasoning block, start your visible response with `[mood:X]` \
+where X is one of: neutral, thinking, alert, pleased, annoyed. Pick based on your \
+genuine reaction. No blank line — your reply follows immediately after.\
 """
 
 
 def _build_system_prompt(memories: dict | None, knowledge: list | None) -> str:
-    prompt = SYSTEM_PROMPT
+    import datetime
+    now = datetime.datetime.now().astimezone()
+    prompt = SYSTEM_PROMPT + f"\n\nCurrent date/time: {now.strftime('%A, %Y-%m-%d %H:%M %Z')}"
     if memories:
         mem_block = "\n".join(f"- {k}: {v}" for k, v in memories.items())
         prompt += f"\n\n## What you remember about this user:\n{mem_block}"
@@ -70,8 +99,9 @@ async def _stream_ollama(
         messages.append(m)
 
     # Think-block state machine: initial → in_think → streaming
-    state   = "initial"
-    pending = ""
+    state          = "initial"
+    pending        = ""
+    thinking_buf   = ""  # accumulates msg.thinking tokens
 
     async def _emit(event: str, text: str) -> None:
         if on_event and text:
@@ -80,56 +110,80 @@ async def _stream_ollama(
     full_content = ""
     tool_calls   = None
 
-    async with httpx.AsyncClient(timeout=180) as client:
-        async with client.stream(
-            "POST",
-            f"{Config.ollama_base_url}/api/chat",
-            json={"model": model, "messages": messages, "tools": tools, "stream": True},
-        ) as resp:
-            resp.raise_for_status()
-            async for line in resp.aiter_lines():
-                if not line:
-                    continue
-                chunk = json.loads(line)
-                msg   = chunk.get("message", {})
-
-                token = msg.get("content", "")
-                if token:
-                    full_content += token
-
-                    if state == "streaming":
-                        await _emit("token", token)
+    async with ollama_lock():
+        async with httpx.AsyncClient(timeout=180) as client:
+            async with client.stream(
+                "POST",
+                f"{Config.ollama_base_url}/api/chat",
+                json={"model": model, "messages": messages, "tools": tools, "stream": True},
+            ) as resp:
+                resp.raise_for_status()
+                async for line in resp.aiter_lines():
+                    if not line:
                         continue
+                    chunk = json.loads(line)
+                    msg   = chunk.get("message", {})
 
-                    pending += token
+                    # Ollama thinking field (qwen3, newer models) — accumulate, emit once
+                    thinking_token = msg.get("thinking", "")
+                    if thinking_token:
+                        thinking_buf += thinking_token
 
-                    if state == "initial":
-                        if _THINK_OPEN in pending:
-                            before = pending[:pending.index(_THINK_OPEN)]
-                            if before.strip():
-                                await _emit("token", before)
-                            pending = pending[pending.index(_THINK_OPEN) + len(_THINK_OPEN):]
-                            state = "in_think"
-                        elif len(pending) > len(_THINK_OPEN) + 2:
-                            await _emit("token", pending)
-                            pending = ""
-                            state = "streaming"
+                    token = msg.get("content", "")
+                    if token:
+                        full_content += token
 
-                    if state == "in_think":
-                        if _THINK_CLOSE in pending:
-                            idx     = pending.index(_THINK_CLOSE)
-                            await _emit("thinking", pending[:idx].strip())
-                            remainder = pending[idx + len(_THINK_CLOSE):]
-                            pending = ""
-                            state   = "streaming"
-                            if remainder:
-                                await _emit("token", remainder)
+                        if state == "streaming":
+                            # Catch <think> blocks that appear after streaming started
+                            if _THINK_OPEN in token:
+                                idx = token.index(_THINK_OPEN)
+                                if idx > 0:
+                                    await _emit("token", token[:idx])
+                                pending = token[idx + len(_THINK_OPEN):]
+                                state = "in_think"
+                                if _THINK_CLOSE in pending:
+                                    close_idx = pending.index(_THINK_CLOSE)
+                                    await _emit("thinking", pending[:close_idx].strip())
+                                    remainder = pending[close_idx + len(_THINK_CLOSE):]
+                                    pending = ""
+                                    state = "streaming"
+                                    if remainder:
+                                        await _emit("token", remainder)
+                            else:
+                                await _emit("token", token)
+                            continue
 
-                if msg.get("tool_calls"):
-                    tool_calls = msg["tool_calls"]
+                        pending += token
 
-                if chunk.get("done"):
-                    break
+                        if state == "initial":
+                            if _THINK_OPEN in pending:
+                                before = pending[:pending.index(_THINK_OPEN)]
+                                if before.strip():
+                                    await _emit("token", before)
+                                pending = pending[pending.index(_THINK_OPEN) + len(_THINK_OPEN):]
+                                state = "in_think"
+                            elif len(pending) > len(_THINK_OPEN) + 2:
+                                await _emit("token", pending)
+                                pending = ""
+                                state = "streaming"
+
+                        if state == "in_think":
+                            if _THINK_CLOSE in pending:
+                                idx     = pending.index(_THINK_CLOSE)
+                                await _emit("thinking", pending[:idx].strip())
+                                remainder = pending[idx + len(_THINK_CLOSE):]
+                                pending = ""
+                                state   = "streaming"
+                                if remainder:
+                                    await _emit("token", remainder)
+
+                    if msg.get("tool_calls"):
+                        tool_calls = msg["tool_calls"]
+
+                    if chunk.get("done"):
+                        if thinking_buf:
+                            await _emit("thinking", thinking_buf.strip())
+                        break
 
     # Flush anything left in pending
     if pending.strip():
@@ -184,7 +238,15 @@ def _history_to_claude(history: list) -> list:
 
         elif role == "assistant":
             tool_calls = msg.get("tool_calls", [])
-            if tool_calls:
+            # Only emit tool_use blocks if every call has a matching tool result following
+            has_results = (
+                tool_calls and
+                all(
+                    (i + 1 + k) < len(history) and history[i + 1 + k]["role"] == "tool"
+                    for k in range(len(tool_calls))
+                )
+            )
+            if tool_calls and has_results:
                 content_blocks = []
                 if msg.get("content"):
                     content_blocks.append({"type": "text", "text": msg["content"]})
