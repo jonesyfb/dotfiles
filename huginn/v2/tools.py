@@ -128,7 +128,7 @@ TOOL_DEFINITIONS = [
         "type": "function",
         "function": {
             "name": "get_weather",
-            "description": "Get current weather and forecast.",
+            "description": "Get current conditions plus a 3-day forecast (high/low/description per day).",
             "parameters": {
                 "type": "object",
                 "properties": {
@@ -380,11 +380,32 @@ async def _web_search(query: str, max_results: int) -> str:
 
 async def _get_weather(location: str) -> str:
     from config import WEATHER_LOCATION
+    import datetime
     loc = location or WEATHER_LOCATION
     try:
         async with httpx.AsyncClient(timeout=10) as c:
-            r = await c.get(f"https://wttr.in/{loc.replace(' ', '+')}?format=4")
-            return r.text.strip()
+            r = await c.get(
+                f"https://wttr.in/{loc.replace(' ', '+')}?format=j1",
+                headers={"Accept": "application/json"},
+            )
+            data = r.json()
+
+        cur = data["current_condition"][0]
+        current = (
+            f"Now: {cur['temp_F']}°F, feels {cur['FeelsLikeF']}°F, "
+            f"{cur['weatherDesc'][0]['value']}, "
+            f"humidity {cur['humidity']}%, wind {cur['windspeedMiles']}mph"
+        )
+
+        days = []
+        for w in data.get("weather", []):
+            date = datetime.datetime.strptime(w["date"], "%Y-%m-%d")
+            label = date.strftime("%a %b %-d")
+            hi, lo = w["maxtempF"], w["mintempF"]
+            desc = w["hourly"][4]["weatherDesc"][0]["value"]  # midday
+            days.append(f"  {label}: {lo}–{hi}°F, {desc}")
+
+        return current + "\n\nForecast:\n" + "\n".join(days)
     except Exception as e:
         return f"weather error: {e}"
 
