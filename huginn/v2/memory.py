@@ -1,20 +1,37 @@
 """
-Two-tier memory: structured facts (sqlite) + conversation history (sqlite).
-sqlite-vec semantic search planned for a future iteration.
+Three-tier memory: structured facts (sqlite) + conversation history (sqlite)
++ semantic vector search (sqlite-vec over nomic-embed-text embeddings).
 """
 import json
 import sqlite3
+import struct
 from contextlib import contextmanager
 from pathlib import Path
 
 from config import DB_PATH
 
+_VEC_DIM = 768  # nomic-embed-text output dimension
+_VEC_AVAILABLE = False
+
+
+def _load_vec(c: sqlite3.Connection) -> bool:
+    try:
+        import sqlite_vec
+        c.enable_load_extension(True)
+        sqlite_vec.load(c)
+        c.enable_load_extension(False)
+        return True
+    except Exception:
+        return False
+
 
 def _conn() -> sqlite3.Connection:
+    global _VEC_AVAILABLE
     DB_PATH.parent.mkdir(parents=True, exist_ok=True)
     c = sqlite3.connect(str(DB_PATH))
     c.row_factory = sqlite3.Row
     c.execute("PRAGMA journal_mode=WAL")
+    _VEC_AVAILABLE = _load_vec(c)
     _init(c)
     return c
 
@@ -42,8 +59,26 @@ def _init(c: sqlite3.Connection) -> None:
             done_at    INTEGER,
             result     TEXT
         );
+        CREATE TABLE IF NOT EXISTS memory_items (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            text   TEXT NOT NULL,
+            source TEXT NOT NULL,
+            ts     INTEGER DEFAULT (unixepoch())
+        );
     """)
+    if _VEC_AVAILABLE:
+        try:
+            c.execute(
+                f"CREATE VIRTUAL TABLE IF NOT EXISTS vec_items "
+                f"USING vec0(embedding float[{_VEC_DIM}])"
+            )
+        except Exception:
+            pass
     c.commit()
+
+
+def _pack(v: list[float]) -> bytes:
+    return struct.pack(f"{len(v)}f", *v)
 
 
 @contextmanager
@@ -114,6 +149,42 @@ def clear_history() -> None:
 
 def session_snapshot() -> list[dict]:
     return get_history(limit=20)
+
+
+# ── Semantic (vector) memory ──────────────────────────────────────────────────
+
+def store_vec(text: str, source: str, embedding: list[float]) -> None:
+    """Store a text item and its embedding. Silently skips if vec unavailable."""
+    if not _VEC_AVAILABLE:
+        return
+    with db() as c:
+        cur = c.execute(
+            "INSERT INTO memory_items(text, source) VALUES(?,?)", (text, source)
+        )
+        row_id = cur.lastrowid
+        c.execute(
+            "INSERT INTO vec_items(rowid, embedding) VALUES(?,?)",
+            (row_id, _pack(embedding)),
+        )
+
+
+def semantic_search(embedding: list[float], limit: int = 5) -> list[dict]:
+    """Return the closest memory_items by cosine-ish distance."""
+    if not _VEC_AVAILABLE:
+        return []
+    with db() as c:
+        rows = c.execute(
+            """
+            SELECT mi.text, mi.source, vi.distance
+            FROM vec_items vi
+            JOIN memory_items mi ON mi.id = vi.rowid
+            WHERE vi.embedding MATCH ?
+              AND k = ?
+            ORDER BY vi.distance
+            """,
+            (_pack(embedding), limit),
+        ).fetchall()
+        return [{"text": r["text"], "source": r["source"], "distance": r["distance"]} for r in rows]
 
 
 # ── Tasks ──────────────────────────────────────────────────────────────────────

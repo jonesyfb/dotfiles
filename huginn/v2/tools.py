@@ -7,6 +7,8 @@ import json
 import subprocess
 from pathlib import Path
 
+import httpx
+
 from memory import set_fact, all_facts, delete_fact
 
 # ── Trust tiers ───────────────────────────────────────────────────────────────
@@ -23,6 +25,7 @@ TOOL_TRUST: dict[str, str] = {
     "remember":      "auto",
     "recall":        "auto",
     "forget":        "auto",
+    "search_memory": "auto",
     "claude_code":   "confirm",
 }
 
@@ -164,6 +167,25 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "search_memory",
+            "description": (
+                "Semantic search over stored memories and facts. "
+                "Finds past remembered items similar in meaning to the query, "
+                "even if the exact words don't match."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Natural language search query"},
+                    "limit": {"type": "integer", "description": "Max results (default 5)"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "claude_code",
             "description": (
                 "Spawn a Claude Code session to complete a coding or engineering task autonomously. "
@@ -252,7 +274,12 @@ async def run_tool(name: str, args: dict) -> str:
                 return await _claude_code(args["prompt"], args.get("cwd", ""))
             case "remember":
                 set_fact(args["key"], args["value"])
+                asyncio.ensure_future(
+                    _embed_and_store(f"{args['key']}: {args['value']}", "fact")
+                )
                 return f"remembered: {args['key']}"
+            case "search_memory":
+                return await _search_memory(args["query"], args.get("limit", 5))
             case "recall":
                 facts = all_facts()
                 return json.dumps(facts, indent=2) if facts else "no facts stored"
@@ -339,11 +366,6 @@ async def _get_weather(location: str) -> str:
     except Exception as e:
         return f"weather error: {e}"
 
-try:
-    import httpx
-except ImportError:
-    pass
-
 
 async def _calendar_list(days: int) -> str:
     try:
@@ -370,6 +392,37 @@ async def _calendar_list(days: int) -> str:
         return await asyncio.to_thread(_fetch)
     except Exception as e:
         return f"calendar error: {e}"
+
+
+async def _get_embedding(text: str) -> list[float]:
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.post(
+            "http://localhost:11434/api/embed",
+            json={"model": "nomic-embed-text", "input": text},
+        )
+        return r.json()["embeddings"][0]
+
+
+async def _embed_and_store(text: str, source: str) -> None:
+    try:
+        from memory import store_vec
+        vec = await _get_embedding(text)
+        store_vec(text, source, vec)
+    except Exception:
+        pass
+
+
+async def _search_memory(query: str, limit: int = 5) -> str:
+    try:
+        from memory import semantic_search
+        vec = await _get_embedding(query)
+        results = semantic_search(vec, limit)
+        if not results:
+            return "no similar memories found"
+        lines = [f"[{r['source']}] {r['text']}" for r in results]
+        return "\n".join(lines)
+    except Exception as e:
+        return f"search error: {e}"
 
 
 async def _claude_code(prompt: str, cwd: str = "") -> str:
