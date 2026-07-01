@@ -343,9 +343,9 @@ async def _calendar_list(days: int) -> str:
         return f"calendar error: {e}"
 
 
-async def _notify(title: str, body: str) -> str:
+async def _notify(title: str, body: str, notif_type: str = "info") -> str:
     proc = await asyncio.create_subprocess_exec(
-        "notify-send", title, body, "-a", "Huginn",
+        "huginn-notify", "--type", notif_type, "--title", title, "--body", body,
         stdout=asyncio.subprocess.DEVNULL,
         stderr=asyncio.subprocess.DEVNULL,
     )
