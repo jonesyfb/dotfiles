@@ -222,14 +222,54 @@ async def task_worker() -> None:
         await asyncio.sleep(5)
 
 
-def _emit_chime(title: str, body: str) -> None:
+async def random_chime_worker() -> None:
+    """Hourly loop: ~25% chance Huginn makes an unsolicited dry observation."""
+    import random
+    await asyncio.sleep(60)  # settle after startup
+    while True:
+        await asyncio.sleep(3600)
+        if Path(GAME_MODE_FLAG).exists():
+            continue
+        if random.random() > 0.25:
+            continue
+        try:
+            stats = await _run_stats()
+            prompt = (
+                f"System stats: {stats}\n\n"
+                "Make one dry, unprompted observation in Huginn's voice. "
+                "One sentence max. No preamble. Don't explain what you're doing."
+            )
+            messages = [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": prompt},
+            ]
+            response = ""
+            async for ev in stream_chat(messages, "fast"):
+                if ev["type"] == "token":
+                    response += ev["content"]
+                elif ev["type"] == "done":
+                    break
+            if response.strip():
+                _emit_chime("huginn", response.strip())
+        except Exception:
+            pass
+
+
+async def _run_stats() -> str:
+    from tools import run_tool
+    return await run_tool("system_stats", {})
+
+
+def _emit_chime(title: str, body: str, notif_type: str = "info") -> None:
     from config import CHIME_LOG
     import time
     log_line = f"[{time.strftime('%H:%M')}] {title}: {body}\n"
     Path(CHIME_LOG).parent.mkdir(parents=True, exist_ok=True)
     with open(CHIME_LOG, "a") as f:
         f.write(log_line)
-    os.system(f'notify-send -a Huginn "{title}" "{body[:100]}"')
+    os.system(
+        f'huginn-notify --type {notif_type} --title "{title}" --body "{body[:200]}"'
+    )
 
 
 # ── Connection handler ────────────────────────────────────────────────────────
@@ -354,6 +394,7 @@ async def main() -> None:
         loop.add_signal_handler(sig, lambda: asyncio.ensure_future(_shutdown(server)))
 
     asyncio.ensure_future(task_worker())
+    asyncio.ensure_future(random_chime_worker())
 
     log.info("Huginn v2 listening on %s", SOCKET_PATH)
     async with server:

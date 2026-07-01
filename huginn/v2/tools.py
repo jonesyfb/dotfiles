@@ -26,6 +26,7 @@ TOOL_TRUST: dict[str, str] = {
     "recall":        "auto",
     "forget":        "auto",
     "search_memory": "auto",
+    "queue_task":    "confirm",
     "claude_code":   "confirm",
 }
 
@@ -167,6 +168,25 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "queue_task",
+            "description": (
+                "Queue a shell command to run in the background task queue. "
+                "The task runs asynchronously; Huginn notifies when it completes. "
+                "Use for long-running jobs: builds, downloads, backups, etc."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "label": {"type": "string", "description": "Short human-readable name for the task"},
+                    "command": {"type": "string", "description": "Shell command to run"},
+                },
+                "required": ["label", "command"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_memory",
             "description": (
                 "Semantic search over stored memories and facts. "
@@ -280,6 +300,8 @@ async def run_tool(name: str, args: dict) -> str:
                 return f"remembered: {args['key']}"
             case "search_memory":
                 return await _search_memory(args["query"], args.get("limit", 5))
+            case "queue_task":
+                return _queue_task(args["label"], args["command"])
             case "recall":
                 facts = all_facts()
                 return json.dumps(facts, indent=2) if facts else "no facts stored"
@@ -392,6 +414,14 @@ async def _calendar_list(days: int) -> str:
         return await asyncio.to_thread(_fetch)
     except Exception as e:
         return f"calendar error: {e}"
+
+
+def _queue_task(label: str, command: str) -> str:
+    import uuid
+    from memory import enqueue_task
+    task_id = str(uuid.uuid4())[:8]
+    enqueue_task(task_id, label, command)
+    return f"queued: {label} (id {task_id})"
 
 
 async def _get_embedding(text: str) -> list[float]:
