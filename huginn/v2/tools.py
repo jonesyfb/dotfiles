@@ -23,6 +23,7 @@ TOOL_TRUST: dict[str, str] = {
     "remember":      "auto",
     "recall":        "auto",
     "forget":        "auto",
+    "claude_code":   "confirm",
 }
 
 # Prefixes that are always safe to run without confirmation
@@ -163,6 +164,32 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "claude_code",
+            "description": (
+                "Spawn a Claude Code session to complete a coding or engineering task autonomously. "
+                "Claude Code can read and write files, run shell commands, and make multi-step changes. "
+                "Use for tasks too complex for a single shell command: refactors, new features, "
+                "debugging sessions, writing tests, or anything requiring multiple files."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "prompt": {
+                        "type": "string",
+                        "description": "Detailed task description for Claude Code",
+                    },
+                    "cwd": {
+                        "type": "string",
+                        "description": "Working directory (default: ~/dotfiles)",
+                    },
+                },
+                "required": ["prompt"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "remember",
             "description": "Save a fact about the user's system or preferences to persistent memory.",
             "parameters": {
@@ -221,6 +248,8 @@ async def run_tool(name: str, args: dict) -> str:
                 return await _calendar_list(args.get("days", 7))
             case "notify":
                 return await _notify(args["title"], args["body"])
+            case "claude_code":
+                return await _claude_code(args["prompt"], args.get("cwd", ""))
             case "remember":
                 set_fact(args["key"], args["value"])
                 return f"remembered: {args['key']}"
@@ -341,6 +370,33 @@ async def _calendar_list(days: int) -> str:
         return await asyncio.to_thread(_fetch)
     except Exception as e:
         return f"calendar error: {e}"
+
+
+async def _claude_code(prompt: str, cwd: str = "") -> str:
+    import os
+    work_dir = Path(cwd).expanduser() if cwd else Path.home() / "dotfiles"
+    if not work_dir.exists():
+        work_dir = Path.home()
+
+    proc = await asyncio.create_subprocess_exec(
+        "claude", "--print", "--dangerously-skip-permissions",
+        "--output-format", "text",
+        prompt,
+        cwd=str(work_dir),
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+        env={**os.environ},
+    )
+    try:
+        out, err = await asyncio.wait_for(proc.communicate(), timeout=300)
+        result = out.decode(errors="replace").strip()
+        if not result:
+            result = err.decode(errors="replace").strip()[:500] or "no output"
+        # Surface the tail — final answer is at the end of verbose output
+        return result[-3000:] if len(result) > 3000 else result
+    except asyncio.TimeoutError:
+        proc.kill()
+        return "timeout after 5 minutes"
 
 
 async def _notify(title: str, body: str, notif_type: str = "info") -> str:

@@ -1,0 +1,7 @@
+[Unit]
+Description=Huginn morning briefing
+After=huginn.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'python3 /home/nate/dotfiles/huginn/backend/huginn_send.py chat false "morning briefing: check weather, give me a one-line summary of the day, and mention anything unusual about system health" > /tmp/huginn-morning.log 2>&1'
