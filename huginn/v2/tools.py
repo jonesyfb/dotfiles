@@ -390,8 +390,10 @@ async def _get_weather(location: str) -> str:
             )
             data = r.json()
 
+        today = datetime.date.today()
         cur = data["current_condition"][0]
         current = (
+            f"Today is {today.strftime('%A %b %-d')}. "
             f"Now: {cur['temp_F']}°F, feels {cur['FeelsLikeF']}°F, "
             f"{cur['weatherDesc'][0]['value']}, "
             f"humidity {cur['humidity']}%, wind {cur['windspeedMiles']}mph"
@@ -399,11 +401,19 @@ async def _get_weather(location: str) -> str:
 
         days = []
         for w in data.get("weather", []):
-            date = datetime.datetime.strptime(w["date"], "%Y-%m-%d")
-            label = date.strftime("%a %b %-d")
+            date = datetime.datetime.strptime(w["date"], "%Y-%m-%d").date()
+            delta = (date - today).days
+            if delta < 0:
+                label = date.strftime("%a %b %-d")  # past day, just show date
+            elif delta == 0:
+                label = "Today"
+            elif delta == 1:
+                label = "Tomorrow"
+            else:
+                label = date.strftime("%A")
             hi, lo = w["maxtempF"], w["mintempF"]
             desc = w["hourly"][4]["weatherDesc"][0]["value"]  # midday
-            days.append(f"  {label}: {lo}–{hi}°F, {desc}")
+            days.append(f"  {label} ({date.strftime('%a %b %-d')}): {lo}–{hi}°F, {desc}")
 
         return current + "\n\nForecast:\n" + "\n".join(days)
     except Exception as e:
