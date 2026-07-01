@@ -266,35 +266,38 @@ async def _write_file(path: str, content: str) -> str:
 
 
 async def _system_stats() -> str:
-    tasks = [
-        asyncio.create_subprocess_shell(
-            "echo CPU:$(grep -m1 cpu /proc/stat | awk '{u=$2+$4; t=$2+$3+$4+$5+$6+$7; print int(100*u/t)\"%\"}'); "
-            "echo MEM:$(free -h | awk '/Mem:/{print $3\"/\"$2}'); "
-            "echo DISK:$(df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'); "
-            "echo UPTIME:$(uptime -p); "
-            "f=$(ls /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null | head -1); "
-            "[ -f \"$f\" ] && echo GPU:$(cat \"$f\")% || true",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-    ]
-    proc = (await asyncio.gather(*tasks))[0]
+    proc = await asyncio.create_subprocess_shell(
+        "TZ=America/Chicago date +'TIME:%H:%M %Z'; "
+        "echo CPU:$(grep -m1 cpu /proc/stat | awk '{u=$2+$4; t=$2+$3+$4+$5+$6+$7; print int(100*u/t)\"%\"}'); "
+        "echo MEM:$(free -h | awk '/Mem:/{print $3\"/\"$2}'); "
+        "echo DISK:$(df -h / | awk 'NR==2{print $3\"/\"$2\" (\"$5\")\"}'); "
+        "echo UPTIME:$(uptime -p); "
+        "f=$(ls /sys/class/drm/card*/device/gpu_busy_percent 2>/dev/null | head -1); "
+        "[ -f \"$f\" ] && echo GPU:$(cat \"$f\")% || true",
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.DEVNULL,
+    )
     out, _ = await proc.communicate()
     return out.decode().strip()
 
 
 async def _web_search(query: str, max_results: int) -> str:
-    try:
-        from duckduckgo_search import DDGS
-        results = await asyncio.to_thread(
-            lambda: list(DDGS().text(query, max_results=max_results))
-        )
-        lines = []
-        for r in results:
-            lines.append(f"• {r.get('title', '')}\n  {r.get('href', '')}\n  {r.get('body', '')[:200]}")
-        return "\n\n".join(lines) or "no results"
-    except Exception as e:
-        return f"search error: {e}"
+    for attempt in range(2):
+        try:
+            from ddgs import DDGS
+            results = await asyncio.to_thread(
+                lambda: list(DDGS().text(query, max_results=max_results))
+            )
+            if results:
+                lines = []
+                for r in results:
+                    lines.append(f"• {r.get('title', '')}\n  {r.get('href', '')}\n  {r.get('body', '')[:200]}")
+                return "\n\n".join(lines)
+        except Exception as e:
+            if attempt == 1:
+                return f"search error: {e}"
+            await asyncio.sleep(1)
+    return "no results"
 
 
 async def _get_weather(location: str) -> str:

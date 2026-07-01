@@ -10,4 +10,5 @@ dependencies = [
     "duckduckgo-search>=8.1.1",
     "html2text>=2024.2.26",
     "caldav>=3.1.0",
+    "ddgs>=9.14.4",
 ]
