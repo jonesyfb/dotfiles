@@ -81,8 +81,30 @@ updates it — there's no plugin manager doing that for you. If something in
 cd ~/vim/plugged/lsp && git fetch origin main && git log HEAD..origin/main --oneline
 ```
 
-If there are relevant fixes, `git reset --hard origin/main` (the clone has no
-local edits, so this is a safe update, same as any plugin manager would do).
+If there are relevant fixes and **no local patches applied** (see below),
+`git reset --hard origin/main` is a safe update. If local patches *are*
+applied, don't do that in place — it'll silently wipe them out. Instead
+`rm -rf ~/vim/plugged/lsp` and relaunch vim; `plugins.vim` reclones fresh
+and reapplies every patch in `vim/patches/` automatically.
+
+### Local plugin patches (`vim/patches/`)
+
+`s:ensure()` in `plugins.vim` takes optional patch filenames applied once,
+right after a fresh clone — for local fixes ahead of upstream. Currently:
+
+- **`lsp-async-pull-diagnostics.patch`** (`yegappan/lsp`): the plugin's
+  `PullDiagnostics()` used a synchronous `ch_evalexpr` RPC call with no
+  timeout — for LSP servers that support pull-model diagnostics (e.g.
+  rust-analyzer), this blocks Vim's entire main loop until the server
+  responds, which during a server's initial full-project indexing can
+  freeze all input for several seconds right after a file opens. Patched
+  to use the plugin's existing async RPC path instead (same one used for
+  the `initialize` handshake), with matching adjustments so the benign
+  "please retry" response (`LSP_ERROR_SERVER_CANCELLED` +
+  `retriggerRequest`) doesn't surface as a spurious error message — the
+  synchronous path suppressed that via `handleError: false`, which the
+  async path has no equivalent for. Check upstream (see command above) —
+  if this is fixed for real there, drop the patch.
 
 Per-filetype indent overrides live in `vim/after/ftplugin/` (2-space for
 yaml/json/js/ts/jsx/tsx/html/css/scss/lua/sh/md/toml; global default in
@@ -91,6 +113,11 @@ yaml/json/js/ts/jsx/tsx/html/css/scss/lua/sh/md/toml; global default in
 `runtimepath` — both entries are required, not just the parent dir.
 `options.vim` also forces `encoding=utf-8`, since some terminals/locales
 default vim to `latin1`, which corrupts the UTF-8 diagnostic sign glyphs.
+It also sets `signcolumn=yes` so the gutter is reserved from file-open
+instead of appearing (and reflowing the whole window) on the first
+diagnostic sign.
 
-Format-on-save is wired for `.rs` and `.py` (`autocmd BufWritePre ... LspFormat`
-in `lsp.vim`). Manual format: `<leader>f`.
+Format-on-save for `.rs`/`.py` shells out directly to `rustfmt`/`ruff format`
+(see `s:FormatWithCmd()` in `lsp.vim`) rather than going through the LSP —
+that keeps it fast regardless of whether rust-analyzer/pyright are still
+indexing. Manual full LSP format: `<leader>f`.
