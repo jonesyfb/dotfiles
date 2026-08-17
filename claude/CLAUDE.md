@@ -18,10 +18,16 @@ Delegate:
 - First-pass code review / diff review
 - Research (library behavior, API docs, comparing approaches)
 - Any task whose result is easy for Claude to verify at a glance
+- Mechanical multi-file edits once the pattern is fully pinned down (same
+  field rename across N templates, same import/symbol swap across N call
+  sites) — hand Codex the exact mapping + file list as one batch, review
+  the diff after. Don't hand-edit these one file at a time yourself.
 
 Keep on Claude:
 - Architecture / design decisions
-- Multi-file refactors requiring judgment across the change
+- Multi-file changes where the *pattern itself* still requires judgment
+  (not just applying it) — e.g. deciding how to split a checkout flow,
+  designing a guard/validation rule, a cross-app FK migration's shape
 - Ambiguous or hard-to-reproduce bugs
 - Final review/integration of anything Codex produced
 
@@ -50,6 +56,15 @@ is the one real gotcha — don't skip the Enter step.
 Give Codex prompts that are self-contained (it has no memory of this
 conversation) — include exact file paths, function names, and the
 specific question, not "based on what we discussed."
+
+Retrospective 2026-08-17 (cts storefront-API migration): caught myself
+hand-editing the same field-rename across 6 templates and the same
+Product→SyncedProduct import swap across 8 call sites, one Edit call at a
+time, instead of batching either into a single Codex task. The checkout
+split / guard design / FK-migration-shape work in that same session was
+correctly kept on Claude. Rule of thumb: once I'm writing the third
+near-identical edit for the same fully-specified pattern, that's the
+signal to stop and batch the rest to Codex instead.
 
 ## Employer code: cleared
 
