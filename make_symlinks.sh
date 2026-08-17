@@ -55,6 +55,14 @@ elif [ -f "$DOTFILES_DIR/vim/.vimrc" ]; then
     create_symlink "$DOTFILES_DIR/vim/.vimrc" "$HOME/.vimrc"
 fi
 
+# Claude Code reads its global instructions from ~/.claude, not ~/.config,
+# so this one is linked by hand like the vimrc above (and `claude` is skipped
+# in the loop below, which would otherwise put it in ~/.config).
+if [ -f "$DOTFILES_DIR/claude/CLAUDE.md" ]; then
+    mkdir -p "$HOME/.claude"
+    create_symlink "$DOTFILES_DIR/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
+fi
+
 # Niri per-machine output config
 echo ""
 echo -e "${GREEN}=== Niri Output Config ===${NC}"
@@ -86,7 +94,7 @@ for item in "$DOTFILES_DIR"/*; do
     
     # Skip certain items
     case "$name" in
-        .git|.gitignore|README*|LICENSE*|*.md|vim)
+        .git|.gitignore|README*|LICENSE*|*.md|vim|claude)
             echo -e "${YELLOW}Skipping: $name${NC}"
             continue
             ;;
