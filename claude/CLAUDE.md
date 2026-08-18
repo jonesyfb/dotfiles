@@ -47,70 +47,97 @@ Rule of thumb: writing a third near-identical edit for one fully-specified
 pattern means stop and batch the rest to Codex. Same for a second big file
 read chasing one fact.
 
-## Keep a Codex pane per project
+## Keep Codex panes per project
 
 The policy fails on friction, not on rules. Cold-starting a pane mid-task
-always looks more expensive than just doing the work inline, so the work
-stays on Claude and the quota drains. Fix it by having the pane ready
-before it is needed.
+always looks more expensive than doing the work inline, so the work stays
+on Claude and the quota drains. Fix it by having panes ready before they
+are needed.
 
 At the start of any session with real work in it, check `herdr agent list`
 for a `codex` agent in this `cwd`. If there is none, start one immediately
-— before the first delegable task, not when one shows up.
+— before the first delegable task, not when one shows up. Add more panes
+whenever a plan has independent tracks; concurrency needs one pane per
+concurrent task.
 
-Reuse an idle Codex pane in the right `cwd` rather than starting another.
+**Name it at start, uniquely.** Names are global across every project, so
+`codex` alone is unusable: `agent start codex` fails with
+`agent_name_taken` once any pane holds it, and targeting bare `codex`
+fails with `agent_target_ambiguous` once two exist. Use
+`codex-<project>`, plus `-a`/`-b` suffixes for fan-out panes.
 
-## How to delegate
+```sh
+eval "$(herdr pane current --current | jq -r '.result.pane |
+  "TAB=\(.tab_id) WS=\(.workspace_id) CWD=\(.cwd)"')"
+herdr agent start codex-<project> --cwd "$CWD" --workspace "$WS" \
+  --tab "$TAB" --split right --no-focus -- codex
+```
 
-1. Find or start the pane:
-   `herdr agent list` — check for a `codex` agent with a matching `cwd`
+Pin `--workspace`/`--tab` or the pane opens on some other tab than the
+Claude that spawned it. `--no-focus` stops it stealing focus mid-task. If
+it boots into a hooks/info screen, dismiss it with
+`herdr pane send-keys <pane_id> Escape`.
 
-   **Pin the placement, or it lands somewhere else.** With no `--tab`,
-   `agent start` picks its own spot and the pane can open on a different
-   tab or workspace than the Claude that spawned it. Read the current
-   ids first and pass them through:
+## Plan the split before running anything
 
-   ```sh
-   eval "$(herdr pane current --current | jq -r '.result.pane |
-     "TAB=\(.tab_id) WS=\(.workspace_id) CWD=\(.cwd)"')"
-   herdr agent start codex --cwd "$CWD" --workspace "$WS" --tab "$TAB" \
-     --split right --no-focus -- codex
-   ```
+Concurrency is a planning decision, not an execution one. By the time a
+task is in flight it is too late to parallelise it, so decomposition has
+to name the independent tracks up front.
 
-   `--no-focus` keeps the split from stealing focus mid-task. If it boots
-   into a hooks/info screen instead of the prompt, dismiss it:
-   `herdr pane send-keys <pane_id> Escape`
+When a plan is drawn up, before any of it runs:
 
-   **Then rename it, always** — not just when running several at once:
+1. Mark every step as Codex-work or Claude-work by the fan-out rule above.
+2. Group the Codex steps into tracks that do not depend on each other's
+   output. Anything reading different files, or answering different
+   questions, is almost always independent.
+3. Give each track its own pane and start them all at once.
 
-   ```sh
-   herdr agent rename <pane_id> codex-<project>
-   ```
+Steps that only *look* sequential usually are not: "find the callers",
+"check how the API behaves", and "see which tests cover this" are three
+independent reads, not a chain. A dependency exists only when one task
+needs another's actual output as input.
 
-   With two or more Codex panes alive, the bare target `codex` stops
-   resolving and every command fails with `agent_target_ambiguous`.
-   Since the rule above is one pane per project, that state is the norm,
-   not the exception. Target the unique name (or the `pane_id`) from here
-   on — never bare `codex`.
-2. Hand it the task. `herdr pane run <pane_id> "<task>"` sends the text
-   *and* Enter in one call — prefer it. The `agent send` path types
-   without submitting, so it needs an explicit Enter and is easy to get
-   wrong:
-   `herdr agent send codex-<project> "<task>"` + `herdr pane send-keys <pane_id> Enter`
-3. Confirm it started, then block until done:
-   `herdr agent wait codex-<project> --status working --timeout 15000`
-   `herdr agent wait codex-<project> --status idle --timeout 180000`
-4. Pull the result — **ask for the smallest read that answers it**.
-   `herdr agent read codex-<project> --lines 40` is usually plenty; `--lines 200`
-   pulls a wall of reasoning into context and undoes the saving.
-5. Review the output before treating it as fact — Codex's result is an
-   input to your judgment, not a substitute for it.
+## Run the batch — fan out, then join
 
-Long or independent jobs can run in parallel: start several panes, fire
-them all off, then `wait` on each in turn — the per-pane names from step 1
-are what keep them addressable. For work touching the same files,
-`herdr worktree create --branch <name>` gives a pane its own checkout so
-the edits cannot collide.
+Send every independent task first, then collect. Never send → wait →
+send → wait; that serialises work that had no reason to be serial, and
+total time becomes the sum instead of the longest single task.
+
+```sh
+resolve() { herdr agent list | jq -r --arg n "$1" \
+  '.result.agents[] | select(.name==$n) | .pane_id'; }
+
+herdr pane run "$(resolve codex-proj-a)" "<task A>"    # fan out
+herdr pane run "$(resolve codex-proj-b)" "<task B>"
+
+herdr agent wait codex-proj-a --status working --timeout 20000  # join
+herdr agent wait codex-proj-b --status working --timeout 20000
+herdr agent wait codex-proj-a --status idle --timeout 180000
+herdr agent wait codex-proj-b --status idle --timeout 180000
+```
+
+Details that bite:
+
+- **Resolve pane ids by name at send time.** `pane run` needs a pane id,
+  but ids are not durable — panes get renumbered and can disappear
+  outright. The agent name is the stable handle.
+- **Never redirect `pane run` to `/dev/null`.** A dead pane id fails
+  silently and the task simply never runs.
+- **Wait for `working` before waiting for `idle`.** A pane that has not
+  picked the task up yet is still `idle`, so an immediate idle-wait
+  returns instantly and the read comes back empty.
+- **Do not idle during the join.** Codex running is exactly the window
+  for Claude-only work — design decisions, reviewing what an earlier
+  track returned. Block only when nothing else is left.
+- **Reads stay small.** `herdr agent read <name> --lines 40` is usually
+  plenty; `--lines 200` pulls a wall of reasoning back into context and
+  undoes the saving.
+- Review every result before treating it as fact. Codex's output is an
+  input to your judgment, not a substitute for it.
+
+For tracks that *write* to the same files, give each its own checkout
+with `herdr worktree create --branch <name>` so the edits cannot collide.
+Read-only tracks can share a repo freely.
 
 ## Prompting Codex
 
@@ -124,10 +151,11 @@ Ask for compact answers, or the fan-out saving leaks back out in the read:
 - "List the failing test names and the assertion that failed. Nothing else."
 - "Report what you changed as a one-line summary per file."
 
-Verified working 2026-08-18 against the dotfiles repo: pinned `agent start`
-→ `agent rename` → `pane run` → `agent wait` → `agent read --lines 40`.
-The pane opened in the calling tab, `pane run` submitted with no separate
-Enter, and a compact-output prompt came back as a single line.
+Verified working 2026-08-18 against the dotfiles repo: two panes pinned to
+the calling tab, both fired with `pane run`, both `working` by t+1s and
+both `idle` at t+6s — one task alone had taken 7s, so the batch cost the
+longest task, not the sum. Also observed live: a pane vanished mid-session
+and its stale id failed silently under `/dev/null`.
 
 Retrospective 2026-08-17 (cts storefront-API migration): hand-edited one
 field rename across 6 templates and one import swap across 8 call sites,
