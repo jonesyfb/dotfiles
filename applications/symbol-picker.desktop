@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Symbol Picker
+GenericName=Character Picker
+Comment=Insert Icelandic, Norse and Scandinavian characters
+Exec=/home/nate/.config/niri/scripts/symbol-picker.sh
+Icon=accessories-character-map
+Terminal=false
+Categories=Utility;
+Keywords=symbol;character;unicode;icelandic;norse;thorn;eth;runes;accent;
+StartupNotify=false

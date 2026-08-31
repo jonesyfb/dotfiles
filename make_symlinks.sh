@@ -63,6 +63,18 @@ if [ -f "$DOTFILES_DIR/claude/CLAUDE.md" ]; then
     create_symlink "$DOTFILES_DIR/claude/CLAUDE.md" "$HOME/.claude/CLAUDE.md"
 fi
 
+# Launcher entries. Fuzzel reads the XDG applications dirs, not ~/.config, so
+# these are linked one file at a time like the two above (and `applications`
+# is skipped in the loop below, which would otherwise put it in ~/.config).
+if [ -d "$DOTFILES_DIR/applications" ]; then
+    APPS_DIR="$HOME/.local/share/applications"
+    mkdir -p "$APPS_DIR"
+    for entry in "$DOTFILES_DIR"/applications/*.desktop; do
+        [ -e "$entry" ] || continue
+        create_symlink "$entry" "$APPS_DIR/$(basename "$entry")"
+    done
+fi
+
 # Niri per-machine output config
 echo ""
 echo -e "${GREEN}=== Niri Output Config ===${NC}"
@@ -94,7 +106,7 @@ for item in "$DOTFILES_DIR"/*; do
     
     # Skip certain items
     case "$name" in
-        .git|.gitignore|README*|LICENSE*|*.md|vim|claude)
+        .git|.gitignore|README*|LICENSE*|*.md|vim|claude|applications)
             echo -e "${YELLOW}Skipping: $name${NC}"
             continue
             ;;
