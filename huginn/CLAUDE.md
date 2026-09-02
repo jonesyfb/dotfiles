@@ -47,6 +47,8 @@ with its own recent calls instead of judging cold each time.
   `close` (10%, force-closes the window via `niri msg action close-window`).
   This is live and intentional, not a stub — not reversible, not currently
   user-configurable or rate-limited beyond the shared verdict TTL.
+- Gate judgments (`check_gate()`) run local-only (`judge_once(..., prefer="local")`,
+  Ollama vision model) — screenshots and activity history never leave the machine.
 - **Out of scope (later phase):** resisting being disabled — tracked in memory, not built
 
 New sqlite tables (`v2/memory.py`): `activity_log`, `screenshots`, `gate_verdicts`.
@@ -61,7 +63,7 @@ New socket message: `gate_check` (`{"type": "gate_check", "target": "steam"|"you
 | `v2/llm.py` | Model router, Ollama streaming, Claude streaming |
 | `v2/tools.py` | 13 tools with trust tiers |
 | `v2/memory.py` | SQLite: history, key-value facts, sqlite-vec semantic search |
-| `v2/config.py` | Model table, paths, SYSTEM_PROMPT, credentials |
+| `v2/config.py` | Model table, paths, SYSTEM_PROMPT, CalDAV settings (password from `$HUGINN_CALDAV_PASSWORD`, set in `~/.config/systemd/user/huginn.service.d/override.conf`, not in git) |
 | `backend/huginn_send.py` | CLI client (unchanged, compatible with v2 socket protocol) |
 | `scripts/huginn-bash.sh` | Bash PROMPT_COMMAND hook — fires bash_event on fail/long commands |
 | `scripts/huginn-notify` | Writes JSON to /tmp/huginn-notify.json for QML polling |

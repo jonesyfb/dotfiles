@@ -1,3 +1,4 @@
+import os
 from pathlib import Path
 
 DATA_DIR       = Path.home() / ".local/share/huginn"
@@ -37,7 +38,7 @@ CLAUDE_CODE_ALLOWED_ROOTS = [Path.home() / "dotfiles"]
 
 CALDAV_URL      = "https://calendar.poopenfarten.com/nate/3a375a1d-cea8-6085-146d-5aeb97d0480d/"
 CALDAV_USER     = "nate"
-CALDAV_PASSWORD = "2842021"
+CALDAV_PASSWORD = os.environ.get("HUGINN_CALDAV_PASSWORD", "")
 WEATHER_LOCATION = "Joplin,MO"
 
 SYSTEM_PROMPT = """\

@@ -205,7 +205,7 @@ async def check_gate(target: str) -> dict:
     images = recent_screenshots(limit=5)
 
     try:
-        raw = await judge_once(prompt, images, prefer="cloud")
+        raw = await judge_once(prompt, images, prefer="local")
         verdict = _parse_verdict(raw)
     except Exception as e:
         verdict = {"approved": False, "message": f"Judgment failed ({e}). Denying by default."}
