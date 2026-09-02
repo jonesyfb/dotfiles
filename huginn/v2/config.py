@@ -23,12 +23,20 @@ _OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
 
 # Model routing table
 MODELS: dict[str, dict] = {
-    "fast":   {"backend": "ollama", "model": "qwen3.5:9b",       "label": "qwen3.5 9b"},
-    "full":   {"backend": "ollama", "model": "qwen3.5:27b",      "label": "qwen3.5 27b"},
-    "code":   {"backend": "ollama", "model": "deepseek-r1:32b",  "label": "deepseek r1", "no_tools": True},
-    "vision": {"backend": "ollama", "model": "gemma4:31b",       "label": "gemma4 31b"},
-    "cloud":  {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
+    "fast":        {"backend": "ollama", "model": "qwen3.5:9b",       "label": "qwen3.5 9b"},
+    "full":        {"backend": "ollama", "model": "qwen3.5:27b",      "label": "qwen3.5 27b"},
+    "code":        {"backend": "ollama", "model": "deepseek-r1:32b",  "label": "deepseek r1", "no_tools": True},
+    "vision":      {"backend": "ollama", "model": "gemma4:31b",       "label": "gemma4 31b"},
+    "cloud":       {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
+    "personality": {"backend": "ollama", "model": "qwen3.5:4b",       "label": "qwen3.5 4b (personality)"},
 }
+
+# Key into MODELS naming Huginn's resident personality/wrapper model — the
+# small model responsible for ambient chatter and rendering results in
+# Huginn's voice. Kept configurable so it can be swapped after future
+# auditions without touching routing code. Not yet wired into route_model()
+# or random_chime_worker() — this is deliberately inert until a later slice.
+PERSONALITY_MODEL_KEY = "personality"
 
 # Directories the claude_code tool is allowed to run in. It still runs with
 # --dangerously-skip-permissions (headless, so no interactive prompt is possible),

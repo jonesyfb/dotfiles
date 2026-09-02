@@ -14,7 +14,8 @@ from config import (
     SCREENS_DIR, SCREENSHOT_INTERVAL, SCREENSHOT_KEEP, STEAM_BYPASS_GRACE_SECONDS,
     YOUTUBE_GRACE_SECONDS,
 )
-from llm import judge_once
+from context import focused_window as _focused_window, in_discord_call
+from llm import judge_local_only
 from memory import (
     activity_since, last_verdict, log_activity, prune_activity,
     recent_screenshots, recent_verdicts, save_screenshot, save_verdict,
@@ -23,20 +24,6 @@ from memory import (
 _YOUTUBE_RE = re.compile(r"-\s*YouTube\s*-", re.I)
 _STEAM_APP_RE = re.compile(r"^steam(_app_\d+)?$")
 _NOTIFY = "/home/nate/.local/bin/huginn-notify"
-
-
-def _focused_window() -> dict | None:
-    try:
-        out = subprocess.run(
-            ["niri", "msg", "-j", "windows"], capture_output=True, text=True, timeout=5
-        )
-        windows = json.loads(out.stdout)
-        for w in windows:
-            if w.get("is_focused"):
-                return w
-    except Exception:
-        pass
-    return None
 
 
 async def activity_tracker_worker() -> None:
@@ -109,23 +96,6 @@ def _prune_screenshots() -> None:
     paths = sorted(SCREENS_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime)
     for stale in paths[:-SCREENSHOT_KEEP]:
         stale.unlink(missing_ok=True)
-
-
-def in_discord_call() -> bool:
-    """True if Discord has an active voice call (its WebRTC audio engine is
-    playing back, which only happens while connected to a call)."""
-    try:
-        out = subprocess.run(
-            ["pactl", "-f", "json", "list", "sink-inputs"],
-            capture_output=True, text=True, timeout=5,
-        )
-        sinks = json.loads(out.stdout)
-        return any(
-            s.get("properties", {}).get("application.name") == "WEBRTC VoiceEngine"
-            for s in sinks
-        )
-    except Exception:
-        return False
 
 
 def _notify(notif_type: str, message: str) -> None:
@@ -205,7 +175,7 @@ async def check_gate(target: str) -> dict:
     images = recent_screenshots(limit=5)
 
     try:
-        raw = await judge_once(prompt, images, prefer="local")
+        raw = await judge_local_only(prompt, images)
         verdict = _parse_verdict(raw)
     except Exception as e:
         verdict = {"approved": False, "message": f"Judgment failed ({e}). Denying by default."}

@@ -210,6 +210,15 @@ async def judge_once(
         raise
 
 
+async def judge_local_only(prompt: str, image_paths: list[str] | None = None) -> str:
+    """Local-only judgment for data that must never leave the machine (e.g.
+    gatekeeper screenshots and activity history). Unlike judge_once, there is
+    no `prefer` argument and no code path to _judge_claude anywhere in this
+    function — the cloud model is structurally unreachable from here, not
+    just unselected by a default."""
+    return await _judge_ollama(prompt, image_paths or [])
+
+
 async def _judge_claude(prompt: str, image_paths: list[str]) -> str:
     import base64
     import anthropic
