@@ -14,13 +14,15 @@ import sys
 import uuid
 from pathlib import Path
 
+import ambient
+import context
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
 from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
 from llm import route_model, stream_chat
 from memory import (
     add_turn, get_history, clear_history, session_snapshot,
     enqueue_task, get_pending_tasks, update_task_status, get_all_tasks,
-    recent_verdicts,
+    log_ambient_event, recent_verdicts,
 )
 from tools import TOOL_DEFINITIONS, TOOL_TRUST, run_tool, shell_is_safe
 
@@ -225,17 +227,24 @@ async def task_worker() -> None:
         await asyncio.sleep(5)
 
 
+_AMBIENT_KIND = "periodic_observation"
+
+
 async def random_chime_worker() -> None:
-    """Hourly loop: ~25% chance Huginn makes an unsolicited dry observation."""
-    import random
+    """Hourly loop: ask the ambient policy whether Huginn may make an
+    unsolicited dry observation right now. The policy — not a dice roll —
+    decides via cooldown/budget/dedup/interaction-mode/attention state; a
+    denial here cannot be overridden by anything generated below."""
     await asyncio.sleep(60)  # settle after startup
     while True:
         await asyncio.sleep(3600)
-        if Path(GAME_MODE_FLAG).exists():
-            continue
-        if random.random() > 0.25:
-            continue
         try:
+            snapshot = await context.collect()
+            opportunity = ambient.AmbientOpportunity(kind=_AMBIENT_KIND)
+            decision = ambient.decide(opportunity, snapshot)
+            if not decision.allowed:
+                continue
+
             stats = await _run_stats()
             prompt = (
                 f"System stats: {stats}\n\n"
@@ -252,8 +261,22 @@ async def random_chime_worker() -> None:
                     response += ev["content"]
                 elif ev["type"] == "done":
                     break
-            if response.strip():
-                _emit_chime("huginn", response.strip())
+            response = response.strip()
+            if not response:
+                continue
+
+            # Re-check with the actual generated text so dedup can run
+            # against it — everything else in the snapshot is unchanged
+            # since the first check moments ago.
+            final = ambient.decide(
+                ambient.AmbientOpportunity(kind=_AMBIENT_KIND, candidate_text=response),
+                snapshot,
+            )
+            if not final.allowed:
+                continue
+
+            log_ambient_event(_AMBIENT_KIND, response)
+            _emit_chime("huginn", response)
         except Exception:
             pass
 
@@ -350,6 +373,10 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
                 "youtube": recent_verdicts("youtube", 8),
                 "activity": activity_summary(),
             })
+
+        elif t == "context_snapshot":
+            snapshot = await context.collect()
+            await send(writer, {"type": "context_snapshot", "data": context.to_debug_dict(snapshot)})
 
         else:
             await send(writer, {"type": "error", "message": f"unknown type: {t}"})

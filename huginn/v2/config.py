@@ -18,6 +18,18 @@ GATE_TTL_SECONDS            = 600  # cache a verdict this long before re-judging
 YOUTUBE_GRACE_SECONDS       = 90   # continuous YouTube focus before it counts as recreational
 STEAM_BYPASS_GRACE_SECONDS  = 60   # continuous Steam/game focus before checking for a bypass
 
+# Named — was a bare `120` in llm.py's httpx client. gemma4:31b runs
+# partially on CPU on this box (doesn't fully fit in VRAM alone), so a real
+# gate judgment with images can take significantly longer than a cold-load
+# benchmark would suggest. A timeout here always fails closed (denies) and
+# never falls back to cloud — see llm.judge_local_only.
+GATE_JUDGE_TIMEOUT_SECONDS = 120
+
+# ── Ambient interruption policy ──────────────────────────────────────────────
+AMBIENT_COOLDOWN_SECONDS = 1800     # min gap between ambient events of the same kind
+AMBIENT_DAILY_BUDGET     = 8        # max ambient events of the same kind per rolling 24h
+AMBIENT_DEDUP_WINDOW     = 21600    # don't repeat near-identical text within this window (6h)
+
 OLLAMA_BASE = "http://localhost:11434"
 _OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
 

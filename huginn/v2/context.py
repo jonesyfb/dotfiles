@@ -75,9 +75,13 @@ class AttentionState:
     evidence: tuple[str, ...] = ()
 
 
-def collect_attention(interaction: InteractionState) -> AttentionState:
+def collect_attention(
+    interaction: InteractionState, desktop: "DesktopState | None" = None
+) -> AttentionState:
     if not interaction.interruptions_allowed:
         return AttentionState("do_not_disturb", evidence=interaction.evidence)
+    if desktop is not None and desktop.in_discord_call:
+        return AttentionState("do_not_disturb", evidence=("discord voice call active",))
     return AttentionState("available")
 
 
@@ -119,23 +123,45 @@ class ModelStatus:
     configured: bool
     available: bool | None  # None = couldn't be determined (probe failed)
     reason: str = ""
+    loaded: bool = False  # currently resident in Ollama right now (ollama-backed only)
 
 
 async def probe_ollama_tags() -> set[str] | None:
-    """Base model names (before the `:tag`) currently pulled in Ollama, or
-    None if Ollama couldn't be reached at all — callers must not treat None
-    as "no models available", only as "unknown"."""
+    """Exact model:tag strings currently pulled in Ollama (e.g. "qwen3.5:9b"),
+    or None if Ollama couldn't be reached at all — callers must not treat
+    None as "no models available", only as "unknown".
+
+    Exact tags, not base names: qwen3.5:9b, qwen3.5:27b, and the personality
+    model's qwen3.5:4b all share the base name "qwen3.5" — matching on base
+    name alone would report qwen3.5:4b as pulled just because a same-family,
+    different-size model is."""
     try:
         async with httpx.AsyncClient(timeout=3) as c:
             r = await c.get(f"{OLLAMA_BASE}/api/tags")
             r.raise_for_status()
             data = r.json()
-            return {m["name"].split(":")[0] for m in data.get("models", [])}
+            return {m["name"] for m in data.get("models", [])}
     except Exception:
         return None
 
 
-def collect_models(ollama_tags: set[str] | None) -> dict[str, ModelStatus]:
+async def probe_ollama_loaded() -> list[dict] | None:
+    """Raw /api/ps entries for models currently resident in Ollama (each has
+    at least `model`, `size`, `size_vram`, `expires_at`), or None if the
+    probe itself failed — distinct from "nothing loaded" (an empty list)."""
+    try:
+        async with httpx.AsyncClient(timeout=3) as c:
+            r = await c.get(f"{OLLAMA_BASE}/api/ps")
+            r.raise_for_status()
+            return r.json().get("models", [])
+    except Exception:
+        return None
+
+
+def collect_models(
+    ollama_tags: set[str] | None, loaded: list[dict] | None = None
+) -> dict[str, ModelStatus]:
+    loaded_names = {m.get("model", "") for m in (loaded or [])}
     statuses: dict[str, ModelStatus] = {}
     for key, spec in MODELS.items():
         backend = spec["backend"]
@@ -144,11 +170,11 @@ def collect_models(ollama_tags: set[str] | None) -> dict[str, ModelStatus]:
             if ollama_tags is None:
                 statuses[key] = ModelStatus(key, backend, model, True, None, "ollama unreachable")
             else:
-                base = model.split(":")[0]
-                pulled = base in ollama_tags
+                pulled = model in ollama_tags
                 statuses[key] = ModelStatus(
                     key, backend, model, True, pulled,
                     "" if pulled else "model not pulled",
+                    loaded=model in loaded_names,
                 )
         elif backend == "claude":
             # Presence check only — never read or expose the key value itself.
@@ -230,6 +256,50 @@ def collect_desktop() -> DesktopState:
     return DesktopState(focused_window=win, in_discord_call=discord, evidence=tuple(evidence))
 
 
+# ── Model resources ──────────────────────────────────────────────────────────
+# Distinct from ModelStatus (per-model availability): this is the aggregate
+# resource picture — what's actually resident right now, whether using a
+# given model would evict something else, and the game-mode/cloud
+# constraints the resource policy (v2/ambient.py, gatekeeper.py) must honor.
+
+@dataclass(frozen=True)
+class ModelResourceState:
+    loaded_models: tuple[str, ...]       # Ollama model strings currently resident
+    ollama_reachable: bool
+    contention: bool                     # more than one distinct model resident at once
+    swap_required: dict[str, bool]       # per MODELS key: would selecting it evict a different resident model
+    game_mode_restricts_to_personality: bool
+    cloud_prohibited_for_local_only: bool  # restates llm.judge_local_only's structural guarantee, for the debug view
+    evidence: tuple[str, ...] = ()
+
+
+def collect_model_resources(
+    models: dict[str, ModelStatus],
+    loaded: list[dict] | None,
+    interaction: InteractionState,
+) -> ModelResourceState:
+    reachable = loaded is not None
+    loaded = loaded or []
+    loaded_names = tuple(m.get("model", "") for m in loaded)
+    distinct = set(loaded_names)
+
+    swap_required = {
+        key: bool(distinct) and status.model not in distinct
+        for key, status in models.items()
+        if status.backend == "ollama"
+    }
+
+    return ModelResourceState(
+        loaded_models=loaded_names,
+        ollama_reachable=reachable,
+        contention=len(distinct) > 1,
+        swap_required=swap_required,
+        game_mode_restricts_to_personality=(interaction.mode == "game"),
+        cloud_prohibited_for_local_only=True,
+        evidence=tuple(f"{n} resident" for n in loaded_names),
+    )
+
+
 # ── Snapshot ─────────────────────────────────────────────────────────────────
 
 @dataclass(frozen=True)
@@ -241,6 +311,7 @@ class RuntimeContext:
     models: dict[str, ModelStatus]
     tools: ToolAvailability
     desktop: DesktopState
+    model_resources: ModelResourceState
 
 
 async def collect() -> RuntimeContext:
@@ -248,10 +319,78 @@ async def collect() -> RuntimeContext:
     soft (never raises) and reports its own unknown/unreachable state rather
     than guessing."""
     interaction = collect_interaction()
-    attention = collect_attention(interaction)
     task = await asyncio.to_thread(collect_task)
     ollama_tags = await probe_ollama_tags()
-    models = collect_models(ollama_tags)
+    loaded = await probe_ollama_loaded()
+    models = collect_models(ollama_tags, loaded)
     tools = collect_tools(ollama_tags)
     desktop = await asyncio.to_thread(collect_desktop)
-    return RuntimeContext(time.time(), interaction, attention, task, models, tools, desktop)
+    attention = collect_attention(interaction, desktop)
+    model_resources = collect_model_resources(models, loaded, interaction)
+    return RuntimeContext(
+        time.time(), interaction, attention, task, models, tools, desktop, model_resources
+    )
+
+
+# ── Debug view ───────────────────────────────────────────────────────────────
+# Hand-written, not a generic asdict() dump — that's deliberate. This is the
+# one function responsible for redaction: it must never surface a window
+# title (may contain private page/document content), a credential value, or
+# anything from gatekeeper's screenshots/activity_log (which this module
+# never touches in the first place). Each section's existing source/reason/
+# evidence strings already double as the observed/inferred/manual-override/
+# stale marking — no separate taxonomy is layered on top of them.
+
+def to_debug_dict(snapshot: RuntimeContext) -> dict:
+    overrides_active = []
+    if snapshot.interaction.source.startswith("manual"):
+        overrides_active.append(snapshot.interaction.mode)
+
+    return {
+        "timestamp": snapshot.timestamp,
+        "overrides_active": overrides_active,
+        "interaction": {
+            "mode": snapshot.interaction.mode,
+            "interruptions_allowed": snapshot.interaction.interruptions_allowed,
+            "basis": snapshot.interaction.source,
+            "evidence": list(snapshot.interaction.evidence),
+        },
+        "attention": {
+            "level": snapshot.attention.level,
+            "evidence": list(snapshot.attention.evidence),
+        },
+        "task": {
+            "state": snapshot.task.state,
+            "queued_tasks": snapshot.task.queued_tasks,
+            "evidence": list(snapshot.task.evidence),
+        },
+        "models": {
+            key: {
+                "backend": s.backend,
+                "model": s.model,
+                "configured": s.configured,
+                "available": s.available,  # null = unknown, not "no"
+                "loaded": s.loaded,
+                "reason": s.reason,
+            }
+            for key, s in snapshot.models.items()
+        },
+        "tools": {
+            "claude_cli": snapshot.tools.claude_cli,
+            "ollama_reachable": snapshot.tools.ollama_reachable,
+        },
+        "desktop": {
+            # app_id only — the window title can contain page/document
+            # content and has no diagnostic value here.
+            "focused_app_id": (snapshot.desktop.focused_window or {}).get("app_id"),
+            "in_discord_call": snapshot.desktop.in_discord_call,
+        },
+        "model_resources": {
+            "loaded_models": list(snapshot.model_resources.loaded_models),
+            "ollama_reachable": snapshot.model_resources.ollama_reachable,
+            "contention": snapshot.model_resources.contention,
+            "swap_required": dict(snapshot.model_resources.swap_required),
+            "game_mode_restricts_to_personality": snapshot.model_resources.game_mode_restricts_to_personality,
+            "cloud_prohibited_for_local_only": snapshot.model_resources.cloud_prohibited_for_local_only,
+        },
+    }

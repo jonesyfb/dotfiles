@@ -84,6 +84,12 @@ def _init(c: sqlite3.Connection) -> None:
             message  TEXT NOT NULL,
             ts       INTEGER DEFAULT (unixepoch())
         );
+        CREATE TABLE IF NOT EXISTS ambient_events (
+            id   INTEGER PRIMARY KEY AUTOINCREMENT,
+            kind TEXT NOT NULL,
+            text TEXT NOT NULL,
+            ts   INTEGER DEFAULT (unixepoch())
+        );
     """)
     if _VEC_AVAILABLE:
         try:
@@ -309,3 +315,32 @@ def last_verdict(target: str, within_seconds: int) -> dict | None:
             (target, within_seconds),
         ).fetchone()
         return dict(row) if row else None
+
+
+# ── Ambient interruption policy: cooldown/budget/dedup state ────────────────────
+# Only actually-spoken events are logged here (not denied attempts) — this
+# table's meaning is "what Huginn has said ambiently," which is exactly what
+# cooldown/budget/dedup need to reason about.
+
+def log_ambient_event(kind: str, text: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO ambient_events(kind, text) VALUES(?,?)", (kind, text))
+
+
+def last_ambient_event(kind: str) -> dict | None:
+    with db() as c:
+        row = c.execute(
+            "SELECT text, ts FROM ambient_events WHERE kind=? ORDER BY ts DESC LIMIT 1",
+            (kind,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def recent_ambient_events(kind: str, within_seconds: int) -> list[dict]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT text, ts FROM ambient_events "
+            "WHERE kind=? AND ts >= unixepoch() - ? ORDER BY ts DESC",
+            (kind, within_seconds),
+        ).fetchall()
+        return [dict(r) for r in rows]

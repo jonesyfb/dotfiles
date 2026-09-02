@@ -9,13 +9,14 @@ import re
 import subprocess
 import time
 
+import context
 from config import (
     ACTIVITY_POLL, BROWSER_APPS, EDITOR_APPS, GATE_PROMPT, GATE_TTL_SECONDS,
-    SCREENS_DIR, SCREENSHOT_INTERVAL, SCREENSHOT_KEEP, STEAM_BYPASS_GRACE_SECONDS,
-    YOUTUBE_GRACE_SECONDS,
+    MODELS, SCREENS_DIR, SCREENSHOT_INTERVAL, SCREENSHOT_KEEP,
+    STEAM_BYPASS_GRACE_SECONDS, YOUTUBE_GRACE_SECONDS,
 )
 from context import focused_window as _focused_window, in_discord_call
-from llm import judge_local_only
+from llm import judge_local_only, unload_model
 from memory import (
     activity_since, last_verdict, log_activity, prune_activity,
     recent_screenshots, recent_verdicts, save_screenshot, save_verdict,
@@ -114,7 +115,10 @@ async def _react_to_verdict(target: str, verdict: dict, window: dict) -> None:
     if verdict["approved"]:
         return
 
-    if target != "youtube":
+    # A game-mode resource-policy denial isn't a real judgment (no evidence
+    # was weighed) — never let it trigger the destructive "close" reaction,
+    # only a notify.
+    if target != "youtube" or verdict.get("reason") == "game_mode":
         await asyncio.to_thread(_notify, "warn", verdict["message"])
         return
 
@@ -165,6 +169,23 @@ async def check_gate(target: str) -> dict:
     cached = last_verdict(target, GATE_TTL_SECONDS)
     if cached:
         return {"approved": bool(cached["approved"]), "message": cached["message"], "cached": True}
+
+    # Resource policy, not a judgment: gemma4:31b doesn't fit this box's
+    # VRAM alongside anything else (~17GB VRAM + ~8GB CPU spillover for a
+    # 25GB runtime footprint) and is slow once split. Never trigger a load
+    # of it during game mode. Deliberately NOT cached via save_verdict — a
+    # cached denial here would outlive game mode ending, wrongly blocking a
+    # real request made moments after the user stops playing.
+    if context.collect_interaction().mode == "game":
+        vision_model = MODELS["vision"]["model"]
+        if any(m.get("model") == vision_model for m in (await context.probe_ollama_loaded() or [])):
+            await unload_model(vision_model)
+        return {
+            "approved": False,
+            "message": "Not while you're playing. Ask again after.",
+            "cached": False,
+            "reason": "game_mode",
+        }
 
     prompt = GATE_PROMPT.format(
         target=target,

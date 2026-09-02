@@ -13,7 +13,10 @@ from typing import AsyncIterator
 
 import httpx
 
-from config import MODELS, OLLAMA_BASE, _OLLAMA_LOCK_PATH, GAME_MODE_FLAG, SYSTEM_PROMPT
+from config import (
+    GAME_MODE_FLAG, GATE_JUDGE_TIMEOUT_SECONDS, MODELS, OLLAMA_BASE,
+    SYSTEM_PROMPT, _OLLAMA_LOCK_PATH,
+)
 
 # ── Ollama exclusive lock (shared with garage-watch) ──────────────────────────
 
@@ -263,10 +266,23 @@ async def _judge_ollama(prompt: str, image_paths: list[str]) -> str:
         "stream": False,
     }
     async with ollama_lock():
-        async with httpx.AsyncClient(timeout=120) as client:
+        async with httpx.AsyncClient(timeout=GATE_JUDGE_TIMEOUT_SECONDS) as client:
             r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
             r.raise_for_status()
             return r.json().get("message", {}).get("content", "")
+
+
+async def unload_model(model: str) -> None:
+    """Best-effort immediate unload (keep_alive=0). Fire-and-forget — a
+    failure here just means the model stays resident a bit longer, which is
+    the same as if this were never called. Does not take ollama_lock(): it's
+    used from gatekeeper's game-mode short-circuit specifically so it can't
+    itself get stuck behind a slow judgment holding the lock."""
+    try:
+        async with httpx.AsyncClient(timeout=5) as client:
+            await client.post(f"{OLLAMA_BASE}/api/generate", json={"model": model, "keep_alive": 0})
+    except Exception:
+        pass
 
 
 async def stream_chat(
