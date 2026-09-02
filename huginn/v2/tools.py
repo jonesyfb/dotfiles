@@ -492,11 +492,22 @@ async def _search_memory(query: str, limit: int = 5) -> str:
         return f"search error: {e}"
 
 
+def _resolve_claude_code_dir(cwd: str) -> Path:
+    from config import CLAUDE_CODE_ALLOWED_ROOTS
+    default_root = CLAUDE_CODE_ALLOWED_ROOTS[0]
+    if not cwd:
+        return default_root
+    candidate = Path(cwd).expanduser().resolve()
+    for root in CLAUDE_CODE_ALLOWED_ROOTS:
+        root = root.resolve()
+        if candidate == root or root in candidate.parents:
+            return candidate if candidate.exists() else root
+    return default_root
+
+
 async def _claude_code(prompt: str, cwd: str = "") -> str:
     import os
-    work_dir = Path(cwd).expanduser() if cwd else Path.home() / "dotfiles"
-    if not work_dir.exists():
-        work_dir = Path.home()
+    work_dir = _resolve_claude_code_dir(cwd)
 
     proc = await asyncio.create_subprocess_exec(
         "claude", "--print", "--dangerously-skip-permissions",

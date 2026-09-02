@@ -18,6 +18,12 @@ MODELS: dict[str, dict] = {
     "cloud":  {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
 }
 
+# Directories the claude_code tool is allowed to run in. It still runs with
+# --dangerously-skip-permissions (headless, so no interactive prompt is possible),
+# so this is the actual containment boundary — a bad/malicious prompt can't
+# point it at $HOME or another project via the `cwd` arg.
+CLAUDE_CODE_ALLOWED_ROOTS = [Path.home() / "dotfiles"]
+
 CALDAV_URL      = "https://calendar.poopenfarten.com/nate/3a375a1d-cea8-6085-146d-5aeb97d0480d/"
 CALDAV_USER     = "nate"
 CALDAV_PASSWORD = "2842021"

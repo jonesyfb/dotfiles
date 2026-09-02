@@ -65,7 +65,7 @@ Background workers (always running):
 | `forget` | auto | Delete a fact |
 | `search_memory` | auto | Semantic search via sqlite-vec + nomic-embed-text |
 | `queue_task` | confirm | Enqueue shell command to background task_worker |
-| `claude_code` | confirm | Spawn `claude --print --dangerously-skip-permissions`, 5min timeout |
+| `claude_code` | confirm | Spawn `claude --print --dangerously-skip-permissions`, 5min timeout, `cwd` confined to `CLAUDE_CODE_ALLOWED_ROOTS` (config.py, default `~/dotfiles`) |
 
 ## Memory (three tiers)
 
