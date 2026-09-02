@@ -38,6 +38,9 @@ def main() -> None:
     elif msg_type == "switch_model":
         profile = sys.argv[2] if len(sys.argv) > 2 else ""
         payload: dict = {"type": "switch_model", "profile": profile}
+    elif msg_type == "gate_check":
+        target = sys.argv[2] if len(sys.argv) > 2 else ""
+        payload: dict = {"type": "gate_check", "target": target}
     elif msg_type == "chat":
         # argv: chat <tts:true|false> <content...>
         tts     = sys.argv[2] == "true" if len(sys.argv) > 2 else False
@@ -67,7 +70,7 @@ def main() -> None:
                     print(line, flush=True)
                     try:
                         obj = json.loads(line)
-                        if obj.get("type") in ("done", "cleared", "recovered", "pong", "error", "confirm_ack", "model_switched"):
+                        if obj.get("type") in ("done", "cleared", "recovered", "pong", "error", "confirm_ack", "model_switched", "gate_verdict", "gate_history"):
                             return
                     except json.JSONDecodeError:
                         pass

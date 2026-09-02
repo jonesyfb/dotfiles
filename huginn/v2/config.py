@@ -5,6 +5,17 @@ SOCKET_PATH    = DATA_DIR / "huginn.sock"
 DB_PATH        = DATA_DIR / "huginn_v2.db"
 CHIME_LOG      = DATA_DIR / "chime.log"
 GAME_MODE_FLAG = DATA_DIR / "game-mode"
+SCREENS_DIR    = DATA_DIR / "screens"
+
+# ── Gatekeeper ──────────────────────────────────────────────────────────────
+EDITOR_APPS          = {"zed", "kitty", "code", "code-oss", "jetbrains-studio", "nvim"}
+BROWSER_APPS         = {"brave-browser", "firefox", "chromium", "google-chrome"}
+SCREENSHOT_INTERVAL  = 600     # seconds between screenshots while an editor is focused
+SCREENSHOT_KEEP      = 8       # rolling buffer size
+ACTIVITY_POLL        = 30      # seconds between window-focus polls
+GATE_TTL_SECONDS            = 600  # cache a verdict this long before re-judging
+YOUTUBE_GRACE_SECONDS       = 90   # continuous YouTube focus before it counts as recreational
+STEAM_BYPASS_GRACE_SECONDS  = 60   # continuous Steam/game focus before checking for a bypass
 
 OLLAMA_BASE = "http://localhost:11434"
 _OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
@@ -50,4 +61,30 @@ Brevity examples:
   long command finishes → "That took 4 minutes. Worth it?"
   sudo required → "This needs root. Confirm?"
   random chime → "Your uptime is 12 days. Impressive restraint."
+"""
+
+GATE_PROMPT = """\
+You are Huginn, acting as gatekeeper. The user wants to launch or watch {target}. \
+You decide whether they've earned it — there is no fixed threshold. Judge like a \
+raven who's actually been watching: weigh today's activity log and the attached \
+screenshots, and factor in your own recent verdicts below so you're consistent \
+with yourself, not random. You're allowed to be generous some days and strict \
+others — let your judgment vary the way a mood would, but always justify it with \
+something specific from the evidence, never a vague reason.
+
+Today's window-focus log (chronological):
+{activity_summary}
+
+Currently in a Discord voice call: {discord_status}. A voice call is limited, \
+precious hangout time with friends — weigh that generously, not as idle time. \
+It doesn't excuse everything, but it should count for something real.
+
+Your recent verdicts on "{target}":
+{recent_verdicts}
+
+The message renders in a small notification bubble — one short sentence, 100 \
+characters max. No preamble, no run-ons. Cut it the way you'd cut a chime.
+
+Respond with ONLY a JSON object, no other text:
+{{"approved": true|false, "message": "<one short sentence, in character, said directly to the user, <=100 chars>"}}
 """

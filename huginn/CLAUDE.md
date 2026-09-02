@@ -19,9 +19,39 @@ User (Quickshell overlay or CLI huginn_send.py)
   → add_turn() → sqlite history
 
 Background workers (always running):
-  task_worker()        — sqlite task queue, runs commands, notifies on finish
-  random_chime_worker()— hourly @ 25% chance, dry system observation via notify
+  task_worker()             — sqlite task queue, runs commands, notifies on finish
+  random_chime_worker()     — hourly @ 25% chance, dry system observation via notify
+  activity_tracker_worker() — polls focused window (niri IPC) every 30s, logs it,
+                               detects sustained recreational YouTube focus
+  screenshot_worker()       — grabs a screenshot (grim) every 10min while an
+                               editor is focused, evidence for gate judgments
 ```
+
+## Gatekeeper (accountability gate)
+
+Huginn judges — not a fixed rule — whether Steam/YouTube are earned, based on
+today's window-focus log and recent screenshots. Verdicts are cached
+(`GATE_TTL_SECONDS`, config.py) and stored so Huginn's tone stays consistent
+with its own recent calls instead of judging cold each time.
+
+- `v2/gatekeeper.py` — `activity_tracker_worker()`, `screenshot_worker()`, `check_gate(target)`
+- `check_gate()` builds a prompt from `GATE_PROMPT` (config.py) + activity summary +
+  recent verdicts, calls `llm.judge_once()` (one-shot, non-streaming, image-capable —
+  prefers `cloud`/Claude for judgment quality, falls back to local `vision` model)
+- Steam is gated at both launch points:
+  - `~/.local/share/applications/steam.desktop` `Exec=` → `scripts/huginn-gate-launch.sh`
+  - `~/.local/bin/steam` shadows `/usr/sbin/steam` on `$PATH` for terminal launches
+  - Wrapper fails open (lets the app through) if the daemon is unreachable
+- On a YouTube denial, `_react_to_verdict()` (gatekeeper.py) randomly picks one of:
+  `nag` (60%, notify only), `refocus` (30%, switch to previous window),
+  `close` (10%, force-closes the window via `niri msg action close-window`).
+  This is live and intentional, not a stub — not reversible, not currently
+  user-configurable or rate-limited beyond the shared verdict TTL.
+- **Out of scope (later phase):** resisting being disabled — tracked in memory, not built
+
+New sqlite tables (`v2/memory.py`): `activity_log`, `screenshots`, `gate_verdicts`.
+New socket message: `gate_check` (`{"type": "gate_check", "target": "steam"|"youtube"}`
+→ `{"type": "gate_verdict", "approved": bool, "message": str, "cached": bool}`).
 
 ## File Map
 
@@ -77,7 +107,7 @@ Background workers (always running):
 
 Send one JSON line, receive streamed JSON events until `{"type":"done"}`.
 
-**Inbound:** `chat`, `confirm`, `clear`, `ping`, `recover`, `bash_event`, `switch_model`, `task_queue`
+**Inbound:** `chat`, `confirm`, `clear`, `ping`, `recover`, `bash_event`, `switch_model`, `task_queue`, `gate_check`
 
 **Outbound:**
 ```json
@@ -129,6 +159,7 @@ python3 ~/dotfiles/huginn/backend/huginn_send.py clear
   huginn_v2.db      # SQLite (history, facts, tasks, vec_items, memory_items)
   chime.log         # Append-only chime history
   game-mode         # Flag file: existence disables Huginn responses
+  screens/          # Rolling buffer of gatekeeper evidence screenshots (last 8)
 ```
 
 ## Known Issues / TODO

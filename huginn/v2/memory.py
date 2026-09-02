@@ -65,6 +65,25 @@ def _init(c: sqlite3.Connection) -> None:
             source TEXT NOT NULL,
             ts     INTEGER DEFAULT (unixepoch())
         );
+        CREATE TABLE IF NOT EXISTS activity_log (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            app_id TEXT NOT NULL,
+            title  TEXT NOT NULL,
+            ts     INTEGER DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS screenshots (
+            id     INTEGER PRIMARY KEY AUTOINCREMENT,
+            path   TEXT NOT NULL,
+            app_id TEXT NOT NULL,
+            ts     INTEGER DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS gate_verdicts (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            target   TEXT NOT NULL,
+            approved INTEGER NOT NULL,
+            message  TEXT NOT NULL,
+            ts       INTEGER DEFAULT (unixepoch())
+        );
     """)
     if _VEC_AVAILABLE:
         try:
@@ -226,3 +245,67 @@ def get_all_tasks(limit: int = 10) -> list[dict]:
             (limit,),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Gatekeeper: activity log, screenshots, verdicts ────────────────────────────
+
+def log_activity(app_id: str, title: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO activity_log(app_id, title) VALUES(?,?)", (app_id, title))
+
+
+def prune_activity(older_than_seconds: int = 48 * 3600) -> None:
+    with db() as c:
+        c.execute(
+            "DELETE FROM activity_log WHERE ts < unixepoch() - ?", (older_than_seconds,)
+        )
+
+
+def activity_since(seconds_ago: int) -> list[dict]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT app_id, title, ts FROM activity_log WHERE ts >= unixepoch() - ? ORDER BY ts",
+            (seconds_ago,),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def save_screenshot(path: str, app_id: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO screenshots(path, app_id) VALUES(?,?)", (path, app_id))
+
+
+def recent_screenshots(limit: int = 5) -> list[str]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT path FROM screenshots ORDER BY ts DESC LIMIT ?", (limit,)
+        ).fetchall()
+        return [r["path"] for r in rows]
+
+
+def save_verdict(target: str, approved: bool, message: str) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO gate_verdicts(target, approved, message) VALUES(?,?,?)",
+            (target, int(approved), message),
+        )
+
+
+def recent_verdicts(target: str, limit: int = 5) -> list[dict]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT approved, message, ts FROM gate_verdicts "
+            "WHERE target=? ORDER BY ts DESC LIMIT ?",
+            (target, limit),
+        ).fetchall()
+        return [dict(r) for r in rows]
+
+
+def last_verdict(target: str, within_seconds: int) -> dict | None:
+    with db() as c:
+        row = c.execute(
+            "SELECT approved, message, ts FROM gate_verdicts "
+            "WHERE target=? AND ts >= unixepoch() - ? ORDER BY ts DESC LIMIT 1",
+            (target, within_seconds),
+        ).fetchone()
+        return dict(row) if row else None

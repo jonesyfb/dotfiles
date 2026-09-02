@@ -191,6 +191,75 @@ def _to_claude_tools(tools: list[dict]) -> list[dict]:
     return out
 
 
+async def judge_once(
+    prompt: str,
+    image_paths: list[str] | None = None,
+    prefer: str = "cloud",
+) -> str:
+    """One-shot, non-streaming completion with optional image attachments.
+    Returns the raw text response. Tries `prefer` first, falls back to the
+    local vision model on any failure."""
+    image_paths = image_paths or []
+    try:
+        if prefer == "cloud":
+            return await _judge_claude(prompt, image_paths)
+        return await _judge_ollama(prompt, image_paths)
+    except Exception:
+        if prefer == "cloud":
+            return await _judge_ollama(prompt, image_paths)
+        raise
+
+
+async def _judge_claude(prompt: str, image_paths: list[str]) -> str:
+    import base64
+    import anthropic
+
+    content: list[dict] = []
+    for p in image_paths:
+        data = await asyncio.to_thread(Path(p).read_bytes)
+        content.append({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": "image/png",
+                "data": base64.b64encode(data).decode(),
+            },
+        })
+    content.append({"type": "text", "text": prompt})
+
+    client = anthropic.Anthropic()
+    resp = await asyncio.to_thread(
+        client.messages.create,
+        model=MODELS["cloud"]["model"],
+        max_tokens=512,
+        messages=[{"role": "user", "content": content}],
+    )
+    return "".join(b.text for b in resp.content if b.type == "text")
+
+
+async def _judge_ollama(prompt: str, image_paths: list[str]) -> str:
+    import base64
+
+    images_b64 = [
+        base64.b64encode(await asyncio.to_thread(Path(p).read_bytes)).decode()
+        for p in image_paths
+    ]
+    message: dict = {"role": "user", "content": prompt}
+    if images_b64:
+        message["images"] = images_b64
+
+    payload = {
+        "model": MODELS["vision"]["model"],
+        "messages": [message],
+        "stream": False,
+    }
+    async with ollama_lock():
+        async with httpx.AsyncClient(timeout=120) as client:
+            r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+            r.raise_for_status()
+            return r.json().get("message", {}).get("content", "")
+
+
 async def stream_chat(
     messages: list[dict],
     model_key: str,

@@ -15,10 +15,12 @@ import uuid
 from pathlib import Path
 
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
+from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
 from llm import route_model, stream_chat
 from memory import (
     add_turn, get_history, clear_history, session_snapshot,
     enqueue_task, get_pending_tasks, update_task_status, get_all_tasks,
+    recent_verdicts,
 )
 from tools import TOOL_DEFINITIONS, TOOL_TRUST, run_tool, shell_is_safe
 
@@ -336,6 +338,19 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
             tasks = get_all_tasks()
             await send(writer, {"type": "task_list", "tasks": tasks})
 
+        elif t == "gate_check":
+            target = msg.get("target", "")
+            verdict = await check_gate(target)
+            await send(writer, {"type": "gate_verdict", "target": target, **verdict})
+
+        elif t == "gate_history":
+            await send(writer, {
+                "type": "gate_history",
+                "steam": recent_verdicts("steam", 8),
+                "youtube": recent_verdicts("youtube", 8),
+                "activity": activity_summary(),
+            })
+
         else:
             await send(writer, {"type": "error", "message": f"unknown type: {t}"})
 
@@ -397,6 +412,8 @@ async def main() -> None:
 
     asyncio.ensure_future(task_worker())
     asyncio.ensure_future(random_chime_worker())
+    asyncio.ensure_future(activity_tracker_worker())
+    asyncio.ensure_future(screenshot_worker())
 
     log.info("Huginn v2 listening on %s", SOCKET_PATH)
     async with server:
