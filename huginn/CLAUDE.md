@@ -52,7 +52,7 @@ Background workers (always running):
 
 | Tool | Trust | Description |
 |------|-------|-------------|
-| `shell` | confirm | Shell exec (safe read-only prefixes auto-run) |
+| `shell` | confirm | Shell exec (safe read-only prefixes auto-run; any of `;&\|` ` $()<>` newline forces confirm even on a safe prefix) |
 | `read_file` | auto | File read, 200-line cap |
 | `write_file` | confirm | Write/overwrite file |
 | `system_stats` | auto | CPU, RAM, disk, GPU, uptime, CST time |

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import signal
+import subprocess
 import sys
 import uuid
 from pathlib import Path
@@ -267,8 +268,9 @@ def _emit_chime(title: str, body: str, notif_type: str = "info") -> None:
     Path(CHIME_LOG).parent.mkdir(parents=True, exist_ok=True)
     with open(CHIME_LOG, "a") as f:
         f.write(log_line)
-    os.system(
-        f'huginn-notify --type {notif_type} --title "{title}" --body "{body[:200]}"'
+    subprocess.run(
+        ["huginn-notify", "--type", notif_type, "--title", title, "--body", body[:200]],
+        capture_output=True, timeout=5,
     )
 
 

@@ -45,8 +45,14 @@ _SAFE_PREFIXES = (
     "pgrep", "pidof",
 )
 
+# Characters that let a command chain/substitute past its safe-looking prefix
+# (e.g. "ls -la; rm -rf ~/important" starts with "ls " but isn't just `ls`).
+_SHELL_METACHARS = set(";&|`$()<>\n")
+
 def shell_is_safe(cmd: str) -> bool:
     stripped = cmd.strip()
+    if any(ch in stripped for ch in _SHELL_METACHARS):
+        return False
     return any(stripped.startswith(p) for p in _SAFE_PREFIXES)
 
 
