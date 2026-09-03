@@ -218,9 +218,13 @@ def test_handle_chat_routes_ambiguous_to_existing_route(tmp_path, monkeypatch):
     assert called["existing"] is True
 
 
-def test_handle_direct_social_falls_back_to_existing_route_on_validation_failure(tmp_path, monkeypatch):
+def test_handle_direct_social_never_falls_back_to_existing_route_on_validation_failure(tmp_path, monkeypatch):
+    """Once a turn is confidently classified SOCIAL_DIRECT, a validation
+    failure must never send it to the general reasoning/tool route — see
+    daemon._direct_social_fallback()."""
     _use_temp_db(tmp_path, monkeypatch)
     import daemon
+    import context
 
     async def fake_render_direct_social(content, **kw):
         return DirectSocialResult(False, None, "validation_failed")
@@ -231,13 +235,17 @@ def test_handle_direct_social_falls_back_to_existing_route_on_validation_failure
         called["existing"] = True
         await daemon.send(writer, {"type": "done"})
 
+    async def fake_probe():
+        return []  # nothing resident — a fresh 4b load is fine
+
     monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
     monkeypatch.setattr(daemon, "_handle_chat_via_existing_route", fake_existing)
+    monkeypatch.setattr(context, "probe_ollama_loaded", fake_probe)
 
     writer = _FakeWriter()
     asyncio.run(daemon.handle_direct_social(writer, "Morning."))
 
-    assert called["existing"] is True
+    assert called["existing"] is False
 
 
 def test_handle_direct_social_never_calls_route_model_on_success(tmp_path, monkeypatch):

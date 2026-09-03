@@ -12,6 +12,7 @@ import asyncio
 import ambient
 import context
 import daemon
+import entities
 import personality
 from config import DIRECT_SOCIAL_MODEL_KEY, GAME_MODE_DIRECT_SOCIAL_MODEL_KEY, MODELS, PERSONALITY_MODEL_KEY
 from coordinator import RequestClass
@@ -142,63 +143,245 @@ def test_handle_direct_social_uses_personality_model_during_game_mode(tmp_path, 
     assert captured["model_key"] == "personality"
 
 
-def test_handle_direct_social_falls_back_to_personality_on_denial_for_low_stakes_subtype(tmp_path, monkeypatch):
+def _mock_residency(monkeypatch, loaded_models):
+    async def fake_probe():
+        return [{"model": m} for m in loaded_models]
+
+    monkeypatch.setattr(context, "probe_ollama_loaded", fake_probe)
+
+
+class _CapturingWriter:
+    def __init__(self):
+        self.events = []
+
+    def write(self, data):
+        import json
+        for line in data.decode().splitlines():
+            if line.strip():
+                self.events.append(json.loads(line))
+
+    async def drain(self):
+        pass
+
+    def joined_text(self):
+        return "".join(e["content"] for e in self.events if e["type"] == "token")
+
+
+# ── Focused fallback-hierarchy correction ───────────────────────────────────
+# Once a turn is confidently classified SOCIAL_DIRECT, validation failure
+# (or coordinator denial/error) must never escalate to the general
+# reasoning/tool route — see daemon._direct_social_fallback().
+
+def test_overlong_greeting_never_reaches_route_model(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])  # nothing resident — 4b retry allowed
+    route_model_calls = {"n": 0}
+
+    async def fake_render_direct_social(content, **kw):
+        return personality.DirectSocialResult(False, None, "validation_failed")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+    monkeypatch.setattr(daemon, "route_model", lambda *a, **kw: route_model_calls.__setitem__("n", route_model_calls["n"] + 1))
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
+    assert route_model_calls["n"] == 0
+    assert writer.joined_text() == daemon._DETERMINISTIC_GREETING
+
+
+def test_greeting_retries_with_4b_when_no_wasteful_swap(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])
     calls = []
 
     async def fake_render_direct_social(content, **kw):
         calls.append(kw.get("model_key"))
         if kw.get("model_key") == "direct_social":
-            return personality.DirectSocialResult(False, None, "coordinator_denied:deadline_exceeded")
+            return personality.DirectSocialResult(False, None, "too_many_sentences")
         return personality.DirectSocialResult(True, "Morning.", "rendered")
 
     monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
-    monkeypatch.setattr(daemon.Path, "exists", lambda self: False)
 
-    asyncio.run(daemon.handle_direct_social(_W(), "Morning."))
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
     assert calls == ["direct_social", "personality"]
+    assert writer.joined_text() == "Morning."
 
 
-def test_handle_direct_social_does_not_fall_back_for_capability_question(tmp_path, monkeypatch):
-    """Capability-sensitive subtypes fail over to the existing tool-capable
-    route instead — never silently downgraded to the smaller model."""
+def test_greeting_does_not_evict_resident_9b_for_4b_fallback(tmp_path, monkeypatch):
+    """model residency is not disturbed for a low-value fallback."""
     _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, ["qwen3.5:9b"])  # just loaded for the primary attempt
     calls = []
 
     async def fake_render_direct_social(content, **kw):
         calls.append(kw.get("model_key"))
+        return personality.DirectSocialResult(False, None, "too_many_sentences")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
+    assert calls == ["direct_social"]  # no second attempt with personality
+    assert writer.joined_text() == daemon._DETERMINISTIC_GREETING
+
+
+def test_greeting_retries_with_4b_when_4b_already_resident(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, ["qwen3.5:4b"])  # already resident — free to use
+    calls = []
+
+    async def fake_render_direct_social(content, **kw):
+        calls.append(kw.get("model_key"))
+        if kw.get("model_key") == "direct_social":
+            return personality.DirectSocialResult(False, None, "too_many_sentences")
+        return personality.DirectSocialResult(True, "Morning.", "rendered")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
+    assert calls == ["direct_social", "personality"]
+
+
+def test_qwen9b_unavailable_still_gets_deterministic_greeting_not_general_route(tmp_path, monkeypatch):
+    """qwen3.5:9b unavailable (coordinator denial) is handled identically
+    to a validation failure — same fallback hierarchy, never the general
+    route."""
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, ["qwen3.5:9b"])
+    existing_route_calls = {"n": 0}
+
+    async def fake_render_direct_social(content, **kw):
         return personality.DirectSocialResult(False, None, "coordinator_denied:deadline_exceeded")
 
     async def fake_existing_route(writer, content, decision=None):
-        pass
+        existing_route_calls["n"] += 1
 
     monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
     monkeypatch.setattr(daemon, "_handle_chat_via_existing_route", fake_existing_route)
-    monkeypatch.setattr(daemon.Path, "exists", lambda self: False)
 
-    asyncio.run(daemon.handle_direct_social(_W(), "Are you actually useful?"))
-    assert calls == ["direct_social"]  # no retry with personality
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
+    assert existing_route_calls["n"] == 0
+    assert writer.joined_text() == daemon._DETERMINISTIC_GREETING
 
 
-def test_handle_direct_social_does_not_fall_back_on_validation_failure(tmp_path, monkeypatch):
-    """A validation failure is a content-quality outcome, not an
-    availability one — must not trigger the degraded-model retry."""
+def test_ordinary_social_validation_failure_cannot_invoke_tools(tmp_path, monkeypatch):
     _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, ["qwen3.5:9b"])
+    tool_calls = {"n": 0}
+
+    async def fake_render_direct_social(content, **kw):
+        return personality.DirectSocialResult(False, None, "validation_failed")
+
+    async def fake_stream_chat(*a, **kw):
+        tool_calls["n"] += 1
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+    monkeypatch.setattr(daemon, "stream_chat", fake_stream_chat)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Docker's being a whale again."))
+
+    assert tool_calls["n"] == 0
+    assert writer.joined_text() == daemon._GENERIC_SOCIAL_FALLBACK
+
+
+def test_game_mode_fallback_remains_4b_never_escalates_to_9b(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, ["qwen3.5:4b"])
     calls = []
 
     async def fake_render_direct_social(content, **kw):
         calls.append(kw.get("model_key"))
         return personality.DirectSocialResult(False, None, "validation_failed")
 
-    async def fake_existing_route(writer, content, decision=None):
-        pass
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+    monkeypatch.setattr(daemon.Path, "exists", lambda self: True)  # game mode on
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Morning."))
+
+    assert calls == ["personality"]  # never direct_social, never a second attempt
+    assert writer.joined_text() == daemon._DETERMINISTIC_GREETING
+
+
+def test_identity_question_fallback_is_deterministic_and_truthful(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])
+    calls = []
+
+    async def fake_render_direct_social(content, **kw):
+        calls.append(kw.get("model_key"))
+        return personality.DirectSocialResult(False, None, "validation_failed")
 
     monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
-    monkeypatch.setattr(daemon, "_handle_chat_via_existing_route", fake_existing_route)
-    monkeypatch.setattr(daemon.Path, "exists", lambda self: False)
 
-    asyncio.run(daemon.handle_direct_social(_W(), "Morning."))
-    assert calls == ["direct_social"]
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Who are you?"))
+
+    assert calls == ["direct_social"]  # deterministic-only, no 4b retry
+    assert writer.joined_text() == daemon._DETERMINISTIC_IDENTITY_RESPONSE
+    assert "huginn" in writer.joined_text().lower()
+
+
+def test_capability_question_fallback_uses_truthful_summary(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])
+    calls = []
+
+    async def fake_render_direct_social(content, **kw):
+        calls.append(kw.get("model_key"))
+        return personality.DirectSocialResult(False, None, "validation_failed")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Are you actually useful?"))
+
+    assert calls == ["direct_social"]  # deterministic-only, no 4b retry
+    assert writer.joined_text() == personality.compose_capability_summary_deterministic()
+    assert "can't touch anything here" not in writer.joined_text().lower()
+
+
+def test_entity_correction_fallback_acknowledges_active_identity(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])
+
+    async def fake_render_direct_social(content, **kw):
+        return personality.DirectSocialResult(False, None, "validation_failed")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "I think of Docker as an octopus, not a whale."))
+
+    assert "octopus" in writer.joined_text().lower()
+
+
+def test_entity_correction_restore_fallback_acknowledges_builtin_identity(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    _mock_residency(monkeypatch, [])
+    entities.register(entities.EntityIdentity(canonical_name="Docker", archetype="octopus", source="user"))
+
+    async def fake_render_direct_social(content, **kw):
+        return personality.DirectSocialResult(False, None, "validation_failed")
+
+    monkeypatch.setattr(personality, "render_direct_social", fake_render_direct_social)
+
+    writer = _CapturingWriter()
+    asyncio.run(daemon.handle_direct_social(writer, "Never mind, go back to the original for Docker."))
+
+    assert "whale" in writer.joined_text().lower()
+    assert entities.resolve("Docker").source == "builtin"
 
 
 # ── Surveillance/current-state-claim validator (PART 1 item 5) ──────────────

@@ -330,6 +330,103 @@ def test_dismissal_sets_authoritative_snooze_not_model_invented(tmp_path, monkey
     assert snooze["origin"] == "manual"
 
 
+# ── Focused fallback-hierarchy correction: dismissal is fully deterministic ──
+
+def test_dismissal_never_calls_render_direct_social(tmp_path, monkeypatch):
+    """DISMISSAL requires no model generation at all — not even for the
+    primary attempt."""
+    _use_temp_db(tmp_path, monkeypatch)
+    calls = {"n": 0}
+
+    async def spy_render_direct_social(content, **kw):
+        calls["n"] += 1
+        return personality.DirectSocialResult(True, "should never be called", "rendered")
+
+    monkeypatch.setattr(personality, "render_direct_social", spy_render_direct_social)
+
+    class _W:
+        async def drain(self):
+            pass
+
+        def write(self, data):
+            pass
+
+    asyncio.run(daemon.handle_direct_social(_W(), "Drop it."))
+    assert calls["n"] == 0
+
+
+def test_dismissal_acknowledgement_matches_explicit_hour_duration(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    response = daemon._compose_dismissal_response("Leave me alone for an hour.")
+    assert response == "Fine. One hour of silence."
+    snooze = ambient._active_snooze(ambient.kind_snooze_scope("procrastination_nudge"), now=__import__("time").time())
+    assert snooze is not None
+    remaining = snooze["expires_at"] - __import__("time").time()
+    assert 3590 < remaining <= 3600
+
+
+def test_dismissal_acknowledgement_matches_default_duration(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+    response = daemon._compose_dismissal_response("Drop it.")
+    assert response == "Fine. Thirty minutes of silence."
+    snooze = ambient._active_snooze(ambient.kind_snooze_scope("procrastination_nudge"), now=__import__("time").time())
+    remaining = snooze["expires_at"] - __import__("time").time()
+    assert 1790 < remaining <= 1800
+
+
+def test_dismissal_acknowledgement_matches_explicit_minutes():
+    assert daemon._format_duration_natural(1200) == "twenty minutes"
+
+
+def test_dismissal_never_continues_teasing():
+    """The acknowledgement is a fixed one-sentence template — structurally
+    incapable of tacking on a tease."""
+    response = daemon._compose_dismissal_response("Drop it.")
+    assert response.count(".") <= 2  # "Fine." + "... of silence."
+    assert "?" not in response
+
+
+def test_failed_snooze_persistence_does_not_claim_compliance(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+
+    def broken_set_snooze(*a, **kw):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(ambient, "set_snooze", broken_set_snooze)
+
+    response = daemon._compose_dismissal_response("Drop it.")
+    assert response == daemon._DISMISSAL_PERSISTENCE_FAILURE_TEXT
+    assert "fine" not in response.lower()
+    assert "silence" not in response.lower()
+
+
+def test_handle_direct_social_dismissal_reports_failure_honestly(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+
+    def broken_set_snooze(*a, **kw):
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(ambient, "set_snooze", broken_set_snooze)
+
+    class _CW:
+        def __init__(self):
+            self.events = []
+
+        def write(self, data):
+            import json
+            for line in data.decode().splitlines():
+                if line.strip():
+                    self.events.append(json.loads(line))
+
+        async def drain(self):
+            pass
+
+    writer = _CW()
+    asyncio.run(daemon.handle_direct_social(writer, "Drop it."))
+    text = "".join(e["content"] for e in writer.events if e["type"] == "token")
+    assert text == daemon._DISMISSAL_PERSISTENCE_FAILURE_TEXT
+
+
 # ── Repetition detection (item 10) ──────────────────────────────────────────
 
 def test_is_substantially_repetitive_on_baseline_pair():

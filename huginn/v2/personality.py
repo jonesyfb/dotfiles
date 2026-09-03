@@ -631,6 +631,19 @@ _CAPABILITY_SUMMARY_CLAIMS = (
 )
 
 
+def compose_capability_summary_deterministic() -> str:
+    """Deterministic fallback for CAPABILITY_QUESTION when generation
+    fails — the same truthful facts as _CAPABILITY_SUMMARY_CLAIMS above,
+    pre-composed into first-person text rather than model-generated, so a
+    capability answer is never at risk of a model's phrasing drifting from
+    what's actually true."""
+    return (
+        "I can talk with you and watch a few approved desktop signals. Tools that inspect or "
+        "change things need your confirmation and none are active in this chat right now — "
+        "harder reasoning can be handed off to a stronger model when it's needed."
+    )
+
+
 @dataclass(frozen=True)
 class DirectSocialResult:
     ok: bool
@@ -650,9 +663,20 @@ def _max_tokens_for(subtype: "SocialSubtype | None") -> int:
     reply from being fully generated at all rather than only catching it
     after the fact. Rough chars-per-token estimate with headroom, floored
     so a short subtype (e.g. DISMISSAL) still gets enough room for one
-    real sentence."""
-    _, max_length = _subtype_limits(subtype)
-    return max(40, (max_length // 3) + 20)
+    real sentence.
+
+    A 1-sentence subtype (GREETING, DISMISSAL) gets an additionally tight
+    cap — the chars-based formula alone left enough headroom for
+    qwen3.5:9b to comfortably write a second sentence and then get
+    rejected by the validator every time (observed live: 100% of greeting
+    attempts hit too_many_sentences on both the primary and retry attempt).
+    This doesn't loosen the one-sentence budget itself — it makes the
+    model much less likely to need the retry, or the fallback, at all."""
+    max_sentences, max_length = _subtype_limits(subtype)
+    base = max(40, (max_length // 3) + 20)
+    if max_sentences == 1:
+        return min(base, 28)
+    return base
 
 
 def _sentence_count(text: str) -> int:
@@ -792,6 +816,8 @@ async def render_direct_social(
         content, history, entity_note, subtype, procrastination_nudge_authorized, available_context_claims,
     )
 
+    max_sentences, _ = _subtype_limits(subtype)
+
     for attempt in range(PERSONALITY_RENDER_MAX_RETRIES + 1):
         p = prompt
         if attempt > 0:
@@ -803,6 +829,12 @@ async def render_direct_social(
                 "called Nathan a raven, or substantially repeated your last reply). Answer "
                 "freshly and plainly instead."
             )
+            if max_sentences == 1:
+                p += (
+                    " Stricter this time: ONE short sentence, full stop, then nothing else — "
+                    "no second sentence, no follow-up question, no trailing clause after the "
+                    "first period."
+                )
         try:
             raw = await render_personality_only(
                 DIRECT_SOCIAL_SYSTEM_PROMPT, p, purpose=Purpose.DIRECT, deadline_seconds=deadline,

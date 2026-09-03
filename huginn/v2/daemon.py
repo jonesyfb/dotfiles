@@ -22,7 +22,7 @@ import intent
 import personality
 from config import (
     DIRECT_SOCIAL_MODEL_KEY, GAME_MODE_DIRECT_SOCIAL_MODEL_KEY, GAME_MODE_FLAG,
-    PERSONALITY_MODEL_KEY, SOCKET_PATH, SYSTEM_PROMPT,
+    MODELS, PERSONALITY_MODEL_KEY, SOCKET_PATH, SYSTEM_PROMPT,
 )
 from coordinator import Purpose, coordinator
 from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
@@ -98,6 +98,51 @@ def _parse_snooze_duration_seconds(content: str) -> int:
     return _DISMISSAL_DEFAULT_SNOOZE_SECONDS
 
 
+_NUMBER_WORDS = {
+    1: "one", 2: "two", 3: "three", 4: "four", 5: "five", 6: "six", 7: "seven",
+    8: "eight", 9: "nine", 10: "ten", 15: "fifteen", 20: "twenty", 30: "thirty",
+    40: "forty", 45: "forty-five", 60: "sixty",
+}
+
+
+def _format_duration_natural(seconds: int) -> str:
+    """Plain-words duration for the deterministic dismissal acknowledgement
+    — never digits (matches the rest of Huginn's voice elsewhere), and
+    always derived from the actual authoritative duration, never invented."""
+    if seconds % 3600 == 0:
+        n = seconds // 3600
+        word = _NUMBER_WORDS.get(n, str(n))
+        return f"{word} hour{'s' if n != 1 else ''}"
+    minutes = max(1, round(seconds / 60))
+    word = _NUMBER_WORDS.get(minutes, str(minutes))
+    return f"{word} minute{'s' if minutes != 1 else ''}"
+
+
+_DISMISSAL_PERSISTENCE_FAILURE_TEXT = (
+    "I tried to go quiet but couldn't actually set that — say it again in a bit."
+)
+
+
+def _compose_dismissal_response(content: str) -> str:
+    """Fully deterministic — no model generation at all for DISMISSAL.
+    Composes a one-sentence acknowledgement directly from the actual
+    snooze outcome: never claims compliance if the snooze write itself
+    failed, and states the real persisted duration rather than a model's
+    guess at one."""
+    duration = _parse_snooze_duration_seconds(content)
+    try:
+        ambient.set_snooze(
+            ambient.kind_snooze_scope("procrastination_nudge"), duration,
+            origin="manual", reason="dismissed in conversation",
+        )
+    except Exception:
+        log.exception("dismissal: snooze persistence failed")
+        return _DISMISSAL_PERSISTENCE_FAILURE_TEXT
+    log.info("dismissal: snoozed procrastination_nudge for %ds", duration)
+    phrase = _format_duration_natural(duration)
+    return f"Fine. {phrase[0].upper()}{phrase[1:]} of silence."
+
+
 def _apply_entity_correction(content: str, mentions: list) -> None:
     """Deterministic, code-owned — the model never decides this. A
     high-confidence correction (exactly one resolvable entity mentioned,
@@ -133,11 +178,89 @@ def _apply_entity_correction(content: str, mentions: list) -> None:
     log.info("entity: corrected %s -> archetype=%s", current.canonical_name, new_archetype)
 
 
+_DETERMINISTIC_GREETING = "Still here."
+_DETERMINISTIC_IDENTITY_RESPONSE = "I'm Huginn, the raven living in this machine. Muninn handles memory; I handle now."
+_GENERIC_SOCIAL_FALLBACK = "I don't have a clean answer for that right now."
+
+
+def _compose_entity_correction_ack(mentions: list) -> str:
+    """Deterministic fallback for ENTITY_CORRECTION when generation fails
+    — the state change already happened (in _apply_entity_correction,
+    before generation was even attempted); this just reports the ACTIVE
+    identity truthfully, never the model's own framing of it."""
+    if len(mentions) != 1:
+        return "Noted."
+    identity = entities.resolve(mentions[0])
+    if identity is None:
+        return "Noted."
+    if not identity.archetype:
+        return f"Noted — {identity.canonical_name}, plain and simple."
+    article = "an" if identity.archetype[0].lower() in "aeiou" else "a"
+    return f"{identity.canonical_name}'s {article} {identity.archetype}, as far as I'm concerned now."
+
+
+async def _personality_model_available_without_swap() -> bool:
+    """True only if falling back to qwen3.5:4b costs no model swap: it's
+    already resident, or nothing is resident at all (a fresh load, not an
+    eviction). False (conservatively, including on an unreachable/unknown
+    probe) whenever a DIFFERENT model — almost always qwen3.5:9b, just
+    loaded for the primary attempt this same turn — is resident, since
+    evicting it for a low-value validation-failure retry is exactly the
+    wasteful swap this check exists to prevent."""
+    try:
+        loaded = await context.probe_ollama_loaded()
+    except Exception:
+        return False
+    if loaded is None:
+        return False
+    loaded_models = {m.get("model") for m in loaded}
+    if not loaded_models:
+        return True
+    return MODELS[PERSONALITY_MODEL_KEY]["model"] in loaded_models
+
+
+async def _direct_social_fallback(
+    subtype: "intent.SocialSubtype", content: str, mentions: list,
+    history: list, game_mode: bool, failed_model_key: str,
+) -> str:
+    """Called only when personality.render_direct_social() did not
+    succeed (validation failure OR coordinator denial/error — both are
+    handled identically here, since neither may ever escalate a
+    confidently-classified SOCIAL_DIRECT turn to the general
+    route_model()/tool-calling path). Every branch here returns text
+    directly; none of them touch stream_chat/route_model/TOOL_DEFINITIONS."""
+    if subtype == intent.SocialSubtype.IDENTITY_QUESTION:
+        return _DETERMINISTIC_IDENTITY_RESPONSE
+    if subtype == intent.SocialSubtype.CAPABILITY_QUESTION:
+        return personality.compose_capability_summary_deterministic()
+    if subtype == intent.SocialSubtype.ENTITY_CORRECTION:
+        return _compose_entity_correction_ack(mentions)
+
+    if (
+        not game_mode and failed_model_key != PERSONALITY_MODEL_KEY
+        and subtype in intent.MODEL_FALLBACK_ELIGIBLE_SUBTYPES
+        and await _personality_model_available_without_swap()
+    ):
+        retry = await personality.render_direct_social(
+            content, history=history, entity_note=_entity_note_for(mentions), subtype=subtype,
+            procrastination_nudge_authorized=False, available_context_claims=(), model_key=PERSONALITY_MODEL_KEY,
+        )
+        if retry.ok:
+            log.info("direct_social fallback: subtype=%s model_key=%s succeeded", subtype.value, PERSONALITY_MODEL_KEY)
+            return retry.text
+
+    if subtype == intent.SocialSubtype.GREETING:
+        return _DETERMINISTIC_GREETING
+    return _GENERIC_SOCIAL_FALLBACK
+
+
 async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> None:
-    """High-confidence SOCIAL_DIRECT path: qwen3.5:4b via the coordinator,
-    DIRECT purpose, no tools, no route_model()/stream_chat() involved at
-    all for this turn. Falls back to the existing tool-capable route on
-    validation failure — never ships an unvalidated personality reply.
+    """High-confidence SOCIAL_DIRECT path: no tools, no
+    route_model()/stream_chat() involved at all for this turn — not for
+    the primary attempt, and not for any fallback, either. Once a turn is
+    confidently classified SOCIAL_DIRECT, it stays on this path all the
+    way to a final response; see _direct_social_fallback() for what
+    happens when generation doesn't succeed.
 
     No deterministic present-state feed exists for direct conversation
     (available_context_claims is always empty) and no deterministic
@@ -153,12 +276,14 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
         mentions = entities.extract_mentions(content)  # re-resolve so entity_note reflects the update
 
     if subtype == intent.SocialSubtype.DISMISSAL:
-        duration = _parse_snooze_duration_seconds(content)
-        ambient.set_snooze(
-            ambient.kind_snooze_scope("procrastination_nudge"), duration,
-            origin="manual", reason="dismissed in conversation",
-        )
-        log.info("dismissal: snoozed procrastination_nudge for %ds", duration)
+        # Fully deterministic — no model generation at all. See
+        # _compose_dismissal_response's docstring.
+        response = _compose_dismissal_response(content)
+        log.info("final_response_source=deterministic_dismissal")
+        await send(writer, {"type": "token", "content": response})
+        add_turn("assistant", response)
+        await send(writer, {"type": "done"})
+        return
 
     history = get_history(limit=6)
     if history and history[-1]["role"] == "user":
@@ -172,40 +297,17 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
         procrastination_nudge_authorized=False, available_context_claims=(), model_key=model_key,
     )
 
-    # Availability fallback (not a quality fallback): if the normal
-    # direct-social model was denied by the coordinator or errored — never
-    # for a validation failure, which is a content-quality outcome the
-    # existing route_model()/tool-calling fallback already handles safely —
-    # a low-stakes subtype may retry once against the small resident
-    # personality model instead of dropping straight to the tool-capable
-    # route for what was, structurally, plain banter. Capability-sensitive
-    # and emotionally sensitive subtypes are excluded (see
-    # intent.LOW_STAKES_FALLBACK_SUBTYPES) — those fail over to the
-    # existing route unchanged, same as before this slice.
-    if (
-        not result.ok and not game_mode and model_key != PERSONALITY_MODEL_KEY
-        and subtype in intent.LOW_STAKES_FALLBACK_SUBTYPES
-        and (result.reason.startswith("coordinator_denied") or result.reason == "error")
-    ):
-        log.info(
-            "direct_social: %s unavailable (%s), retrying low-stakes subtype=%s with %s",
-            model_key, result.reason, subtype.value, PERSONALITY_MODEL_KEY,
-        )
-        model_key = PERSONALITY_MODEL_KEY
-        result = await personality.render_direct_social(
-            content, history=history, entity_note=_entity_note_for(mentions), subtype=subtype,
-            procrastination_nudge_authorized=False, available_context_claims=(), model_key=model_key,
-        )
-
     if result.ok:
+        response = result.text
         log.info("final_response_source=personality_direct_social subtype=%s model_key=%s", subtype.value, model_key)
-        await send(writer, {"type": "token", "content": result.text})
-        add_turn("assistant", result.text)
-        await send(writer, {"type": "done"})
-        return
+    else:
+        log.info("direct_social primary failed: model_key=%s reason=%s subtype=%s", model_key, result.reason, subtype.value)
+        response = await _direct_social_fallback(subtype, content, mentions, history, game_mode, model_key)
+        log.info("final_response_source=direct_social_fallback subtype=%s", subtype.value)
 
-    log.info("direct_social fallback to existing route: model_key=%s reason=%s", model_key, result.reason)
-    await _handle_chat_via_existing_route(writer, content, decision=None)
+    await send(writer, {"type": "token", "content": response})
+    add_turn("assistant", response)
+    await send(writer, {"type": "done"})
 
 
 async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:

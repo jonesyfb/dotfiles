@@ -84,19 +84,26 @@ SOCIAL_SUBTYPE_LIMITS: dict[SocialSubtype, tuple[int, int]] = {
     SocialSubtype.ENTITY_CORRECTION: (2, 200),
 }
 
-# Subtypes safe to hand to the smaller qwen3.5:4b model as a fallback when
-# the normal direct-social model (qwen3.5:9b) is unavailable or times out —
-# see daemon.handle_direct_social. Deliberately excludes CAPABILITY_QUESTION
-# (an accurate capability answer matters — better to fail over to the
-# existing tool-capable route than risk a worse one), VULNERABLE_DISCLOSURE
-# (emotionally sensitive, not worth risking a lower-quality response for),
-# and ENTITY_CORRECTION (the state change already happened deterministically
-# regardless of which model narrates it, but getting the acknowledgment
-# wrong here is the one place model quality visibly matters for
-# correctness-adjacent behavior).
-LOW_STAKES_FALLBACK_SUBTYPES = frozenset({
+# Subtypes eligible for a same-text-shape retry against the small
+# qwen3.5:4b model when the normal direct-social model (qwen3.5:9b) fails
+# — validation failure or coordinator denial/error alike — subject to
+# daemon._personality_model_available_without_swap()'s residency check.
+# Deliberately excludes:
+#   - CAPABILITY_QUESTION: an accurate capability answer matters more than
+#     a possibly-worse model's phrasing — falls to the code-owned
+#     deterministic summary instead (personality.compose_capability_summary_deterministic).
+#   - ENTITY_CORRECTION: the state change already happened deterministically
+#     regardless of which model narrates it; on failure, acknowledge the
+#     active identity deterministically instead of risking a model
+#     re-litigating it.
+#   - IDENTITY_QUESTION: a fixed identity fact needs no model at all on
+#     failure — a short deterministic response is more reliable than any
+#     model output for something this static.
+#   - DISMISSAL: never reaches a model in the first place — see
+#     daemon._compose_dismissal_response.
+MODEL_FALLBACK_ELIGIBLE_SUBTYPES = frozenset({
     SocialSubtype.GREETING, SocialSubtype.CASUAL_BANTER, SocialSubtype.ENTITY_OPINION,
-    SocialSubtype.LEISURE_STATEMENT, SocialSubtype.DISMISSAL, SocialSubtype.IDENTITY_QUESTION,
+    SocialSubtype.LEISURE_STATEMENT, SocialSubtype.VULNERABLE_DISCLOSURE,
 })
 
 
