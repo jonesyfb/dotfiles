@@ -31,7 +31,10 @@ from dataclasses import dataclass
 
 import context as ctx
 import memory
-from config import AMBIENT_COOLDOWN_SECONDS, AMBIENT_DAILY_BUDGET, AMBIENT_DEDUP_WINDOW, PERSONALITY_MODEL_KEY
+from config import (
+    AMBIENT_COOLDOWN_SECONDS, AMBIENT_DAILY_BUDGET, AMBIENT_DEDUP_WINDOW,
+    DIRECT_SOCIAL_MODEL_KEY, MODELS, PERSONALITY_MODEL_KEY,
+)
 
 SEVERITIES = ("info", "notice", "critical")
 
@@ -86,6 +89,37 @@ def _capability(snapshot: ctx.RuntimeContext) -> str:
     if personality is not None and personality.available:
         return PERSONALITY_MODEL_KEY
     return "fast"
+
+
+def ambient_render_model_choice(snapshot: ctx.RuntimeContext) -> "str | None":
+    """Resource-aware residency policy for disposable ambient rendering.
+    OLLAMA_MAX_LOADED_MODELS=1 means loading anything not already resident
+    evicts whatever is — never worth doing for a throwaway comment nobody
+    is waiting on. Called AFTER decide() has already allowed the
+    opportunity; this only picks (or refuses) how to render it, never
+    whether it's worth saying.
+
+    Returns a MODELS key to render with, or None to discard the
+    opportunity outright:
+    - qwen3.5:4b (PERSONALITY_MODEL_KEY) resident -> use it, no swap.
+    - qwen3.5:9b (DIRECT_SOCIAL_MODEL_KEY) resident -> render with it
+      instead of discarding or forcing a swap either direction — it's
+      already proven capable and fast in the conversation-model audition
+      (scripts/conversation_bench/results/20260903T171724Z/), and
+      personality.render()'s validators apply identically regardless of
+      which model produced the text, so nothing about safety changes.
+    - anything else resident (vision, full, code, ...) -> discard; never
+      evict a bigger/unrelated model for a disposable comment.
+    - nothing resident -> qwen3.5:4b may be freshly loaded; it's the
+      cheapest model and decide() already judged this worthwhile."""
+    loaded = set(snapshot.model_resources.loaded_models)
+    if not loaded:
+        return PERSONALITY_MODEL_KEY
+    if MODELS[PERSONALITY_MODEL_KEY]["model"] in loaded:
+        return PERSONALITY_MODEL_KEY
+    if MODELS[DIRECT_SOCIAL_MODEL_KEY]["model"] in loaded:
+        return DIRECT_SOCIAL_MODEL_KEY
+    return None
 
 
 def _dedup_hit(kind: str, text: str) -> tuple[bool, tuple[str, ...]]:

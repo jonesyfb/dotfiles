@@ -216,7 +216,7 @@ def test_random_chime_worker_never_renders_when_policy_denies(tmp_path, monkeypa
 
     render_calls = {"n": 0}
 
-    async def spy_render(request, *, purpose=Purpose.AMBIENT):
+    async def spy_render(request, *, purpose=Purpose.AMBIENT, model_key=None):
         render_calls["n"] += 1
         return RenderResult(True, "should not happen", "should not happen", "", "rendered")
 
@@ -262,7 +262,7 @@ def test_random_chime_worker_renders_with_ambient_purpose_when_policy_allows(tmp
 
     render_calls = []
 
-    async def spy_render(request, *, purpose=Purpose.AMBIENT):
+    async def spy_render(request, *, purpose=Purpose.AMBIENT, model_key=None):
         render_calls.append((request.purpose, purpose))
         return RenderResult(True, "Suspiciously calm today.", "Suspiciously calm today.", "CPU: 2%; MEM: 1Gi", "rendered")
 

@@ -364,7 +364,7 @@ def test_max_tokens_scales_with_subtype_budget():
 def test_render_direct_social_passes_max_tokens_to_generation(monkeypatch):
     captured = {}
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         captured["max_tokens"] = max_tokens
         return "Morning."
 
@@ -379,7 +379,7 @@ def test_render_direct_social_retries_on_repetition(monkeypatch):
         "Something completely different this time.",
     ])
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         return next(responses)
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)

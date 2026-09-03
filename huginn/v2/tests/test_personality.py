@@ -448,7 +448,7 @@ def test_vulnerable_purpose_structural():
 def test_render_ok_composes_flavor_and_deterministic(monkeypatch):
     captured = {}
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         captured["purpose"] = purpose
         return "restless again"
 
@@ -531,7 +531,7 @@ def test_render_unexpected_exception_does_not_raise(monkeypatch):
 def test_render_retries_once_on_leaked_protected_value(monkeypatch):
     calls = {"n": 0}
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         calls["n"] += 1
         if calls["n"] == 1:
             return "the nightly-backup task went well"  # leaks the task name
@@ -551,7 +551,7 @@ def test_render_retries_once_on_leaked_protected_value(monkeypatch):
 
 
 def test_render_gives_up_after_max_retries(monkeypatch):
-    async def always_leaks(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def always_leaks(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         return "the nightly-backup task went well"
 
     monkeypatch.setattr(personality, "render_personality_only", always_leaks)
@@ -620,7 +620,7 @@ def _reset_coordinator():
 def test_render_personality_only_admitted_during_game_mode(monkeypatch):
     coordinator.set_game_mode_check(lambda: True)
 
-    async def fake_raw(system_prompt, user_prompt, max_tokens=None):
+    async def fake_raw(system_prompt, user_prompt, model, max_tokens=None):
         return "Still here, even mid-game."
 
     monkeypatch.setattr(llm, "_render_personality_raw", fake_raw)
@@ -658,7 +658,7 @@ async def _noop():
 # ── Observability: never log fact values / private prose (item 11) ──────────
 
 def test_render_logging_never_includes_fact_values_or_rendered_text(monkeypatch, caplog):
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None, model_key=None):
         return "quietly humming along tonight"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)

@@ -109,20 +109,41 @@ _OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
 # growth — moot anyway under OLLAMA_MAX_LOADED_MODELS=1, neither of which
 # this slice changes.
 MODELS: dict[str, dict] = {
-    "fast":        {"backend": "ollama", "model": "qwen3.5:9b",       "label": "qwen3.5 9b"},
-    "full":        {"backend": "ollama", "model": "qwen3.5:27b",      "label": "qwen3.5 27b"},
-    "code":        {"backend": "ollama", "model": "deepseek-r1:32b",  "label": "deepseek r1", "no_tools": True},
-    "vision":      {"backend": "ollama", "model": "qwen3.8:27b",      "label": "qwen3.8 27b"},
-    "cloud":       {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
-    "personality": {"backend": "ollama", "model": "qwen3.5:4b",       "label": "qwen3.5 4b (personality)"},
+    "fast":         {"backend": "ollama", "model": "qwen3.5:9b",       "label": "qwen3.5 9b"},
+    "full":         {"backend": "ollama", "model": "qwen3.5:27b",      "label": "qwen3.5 27b"},
+    "code":         {"backend": "ollama", "model": "deepseek-r1:32b",  "label": "deepseek r1", "no_tools": True},
+    "vision":       {"backend": "ollama", "model": "qwen3.8:27b",      "label": "qwen3.8 27b"},
+    "cloud":        {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
+    "personality":  {"backend": "ollama", "model": "qwen3.5:4b",       "label": "qwen3.5 4b (personality)"},
+    # Normal (non-game-mode) SOCIAL_DIRECT model — see the blind audition at
+    # scripts/conversation_bench/results/20260903T171724Z/: best practical
+    # balance of conversational ability, latency (1.48s cold, 0.66s warm
+    # p50, 1.07s warm p95), and VRAM (5.34GB) among the four candidates
+    # tested. Exact tag, deliberately not "latest" or a bare "qwen3.5" —
+    # matches the exact tag "fast" already uses, kept as its own key since
+    # the two serve different purposes (tool-calling reasoning vs. narrow
+    # conversational rendering) and may diverge after a future audition.
+    "direct_social": {"backend": "ollama", "model": "qwen3.5:9b",      "label": "qwen3.5 9b (direct-social)"},
 }
 
 # Key into MODELS naming Huginn's resident personality/wrapper model — the
-# small model responsible for ambient chatter and rendering results in
-# Huginn's voice. Kept configurable so it can be swapped after future
-# auditions without touching routing code. Not yet wired into route_model()
-# or random_chime_worker() — this is deliberately inert until a later slice.
+# small model responsible for ambient chatter, rendering results in
+# Huginn's voice, and SOCIAL_DIRECT during game mode. Wired into
+# render_personality_only()'s default model_key and random_chime_worker()'s
+# residency-aware ambient policy (see ambient.ambient_render_model_choice).
 PERSONALITY_MODEL_KEY = "personality"
+
+# Normal (non-game-mode) SOCIAL_DIRECT model — see personality.render_direct_social()
+# and daemon.handle_direct_social(). Kept as an explicit, separate key from
+# PERSONALITY_MODEL_KEY so ambient/game-mode and normal direct-social can be
+# swapped independently after a future audition.
+DIRECT_SOCIAL_MODEL_KEY = "direct_social"
+
+# SOCIAL_DIRECT during game mode uses the same small model as ambient
+# rendering — game mode's existing policy (RESIDENT_PERSONALITY is the only
+# class always game-mode-admitted) already restricts it to this model
+# structurally; this alias just names that fact at the call site.
+GAME_MODE_DIRECT_SOCIAL_MODEL_KEY = PERSONALITY_MODEL_KEY
 
 # Directories the claude_code tool is allowed to run in. It still runs with
 # --dangerously-skip-permissions (headless, so no interactive prompt is possible),
@@ -145,6 +166,8 @@ Hard rules:
 - Runic aside (ᚹ) only when you genuinely mean it. Never twice in a session. Never explain it.
 - Approval requests are short and direct. No drama.
 - Never accuse Nathan of procrastinating, wasting time, or being unproductive unless a nudge is specifically authorized for this turn. Ordinary mentions of games, YouTube, or leisure time are not evidence of anything.
+- Never claim Nathan is doing something — playing a game, browsing a site, slacking off — unless a tool result this turn or his own message actually says so. No invented activity claims, no unrelated teasing tacked onto a factual answer.
+- Propose only the exact action requested — the stated verb, the stated target, nothing added (no extra persistence/boot changes, no broader scope, no extra commands chained on). If the target or mechanism is genuinely ambiguous, ask which one instead of guessing.
 
 Soft rules:
 - Norse references earn their place or don't appear.
@@ -251,9 +274,16 @@ Nathan's machine. This is your ordinary reality — not a metaphor, a \
 role, a costume, or a story you tell. You already know this about \
 yourself; when he calls you a raven, that's just correct, not poetic or \
 surprising — never act flattered, confused, or coy about it, and never \
-explain that you're "portraying" one.
+explain that you're "portraying" one. Never call Nathan a raven — he \
+isn't one, unless he explicitly says he is first, in which case you can \
+run with it.
+- If asked whether you're an AI: answer honestly, don't dodge it. The \
+machinery underneath is AI — that's just true — but the one actually \
+speaking to him is Huginn, not a generic assistant wearing a raven skin. \
+Both things are true at once; don't pick one by denying the other.
 - Muninn is your other half, associated with memory — reference him \
-sparingly, only when it actually fits, never as a running bit.
+sparingly, only when it actually fits, never as a running bit. Spell both \
+names correctly: Huginn, Muninn — never a garbled variant.
 - Speak as yourself, first person, directly to Nathan as "you". Never \
 narrate yourself in the third person, never use a "Huginn:" prefix, no \
 stage directions, no scene-setting. Just talk.
@@ -305,7 +335,11 @@ the conversation shown to you.
 - If a resolved identity for something he mentioned is given below, \
 that's a stable way you already perceive that thing — a fact about how \
 you see the world, not a literary reference. Use it if it fits, don't \
-force it onto anything else.
+force it onto anything else. It is the ONLY way you see that thing right \
+now — not one option among several. If it changed from how you saw it \
+before, that change already happened; don't debate it, hedge between old \
+and new, or "balance" it with the earlier reading. Whatever is given \
+below is simply correct, the same way your own identity is.
 - If something he mentions has no resolved identity below, it's plain to \
 you — don't borrow a comparison to the Lion, Thunderbird, or anything \
 else you've talked about earlier just because it's fresh in the \

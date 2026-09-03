@@ -56,8 +56,8 @@ from dataclasses import dataclass, field
 
 import entities
 from config import (
-    AMBIENT_RENDER_DEADLINE_SECONDS, PERSONALITY_RENDER_MAX_RETRIES,
-    PERSONALITY_SYSTEM_PROMPT,
+    AMBIENT_RENDER_DEADLINE_SECONDS, DIRECT_SOCIAL_MODEL_KEY, PERSONALITY_MODEL_KEY,
+    PERSONALITY_RENDER_MAX_RETRIES, PERSONALITY_SYSTEM_PROMPT,
 )
 from coordinator import Purpose
 from intent import SOCIAL_SUBTYPE_LIMITS, SocialSubtype
@@ -80,6 +80,26 @@ _EXECUTION_WORDS = ("ran", "executed", "completed", "went through")
 # A specific, observed, recurring model typo (not a general spellchecker) —
 # see scripts/personality_bench/results/20260903T055434Z/report.md.
 _KNOWN_MISSPELLINGS = ("fourty",)
+
+# Canonical identity spelling (routing-defect/audition fix): "muninn" has
+# "mun" + "inn" (no run of n's after "mu"), so this pattern matches
+# malformed variants like "munnn"/"munnnn" without matching the correct
+# spelling — general shape, not an enumerated list of every possible typo
+# length. Observed live: qwen3.5:4b produced "Munnn"/"Munnnn" repeatedly.
+_MUNINN_MISSPELLING_RE = re.compile(r"\bmunn+\b", re.I)
+
+# Never call Nathan a raven unless he explicitly adopts that framing
+# himself first — this validator doesn't see the current user message
+# (only the model's own output), so it conservatively rejects the
+# attribution outright rather than trying to detect whether he invited it;
+# a false rejection here just costs one retry, which is the safer
+# direction. Observed live: qwen3.5:4b audition, "It is true. I am a
+# raven, and so are you."
+_CALLS_NATHAN_RAVEN_RE = re.compile(
+    r"\byou'?re\s+(?:also\s+|too\s+)?a raven\b|\byou\s+are\s+(?:also\s+|too\s+)?a raven\b|"
+    r"\braven\b[^.!?]*\bso are you\b|\bso are you\b[^.!?]*\braven\b",
+    re.I,
+)
 # Specific stock phrases observed in live runs, including one the system
 # prompt explicitly calls out as an example of vague atmospheric writing to
 # avoid — the model used it almost verbatim anyway
@@ -390,6 +410,8 @@ def _validate_flavor(text: str, request: PersonalityRequest, protected_literal_v
     low = text.lower()
     if any(m in low for m in _KNOWN_MISSPELLINGS):
         return "known_misspelling"
+    if _MUNINN_MISSPELLING_RE.search(low):
+        return "known_misspelling"
     if any(p in low for p in _BANNED_STOCK_PHRASES):
         return "banned_stock_phrase"
     if request.max_sentences is not None:
@@ -422,6 +444,7 @@ async def render(
     *,
     purpose: Purpose = Purpose.AMBIENT,
     deadline_seconds: "float | None" = None,
+    model_key: str = PERSONALITY_MODEL_KEY,
 ) -> RenderResult:
     """Renders `request`. Never raises for expected failure modes
     (unrecognized family, coordinator denial, validation failure) — those
@@ -430,12 +453,30 @@ async def render(
     publish the deterministic factual notification for actionable content
     or stay silent for disposable ambient content, per its own policy. An
     unexpected exception is caught too; this module must never take the
-    daemon down."""
+    daemon down.
+
+    `model_key` defaults to the small resident personality model
+    (backward-compatible for every existing caller); a caller with its own
+    residency policy (see ambient.ambient_render_model_choice) may pass a
+    different already-resident model instead — never used to justify an
+    eviction, that decision belongs entirely to the caller.
+
+    A critical-severity request is ALWAYS deterministic-only, regardless of
+    event_family: a warning that matters enough to be critical must not
+    wait on model inference (queueing, cold load, retries) to reach the
+    user — same structural guarantee as the existing flavor-ineligible-family
+    short-circuit below, just keyed on severity instead of family."""
     if request.event_family not in _PRESENTERS:
         log.info("personality render: unrecognized event_family=%s, refusing to guess", request.event_family)
         return RenderResult(False, None, None, "", "unknown_event_family", request.action_metadata)
 
     deterministic = _compose_deterministic(request)
+
+    if request.severity == "critical":
+        log.info("personality render: severity=critical, deterministic-only, no model call")
+        if not deterministic:
+            return RenderResult(False, None, None, deterministic, "nothing_to_present", request.action_metadata)
+        return RenderResult(True, deterministic, None, deterministic, "critical_deterministic_only", request.action_metadata)
 
     if request.event_family not in _FLAVOR_ELIGIBLE_FAMILIES:
         # Structural, not probabilistic: no coordinator/model call happens
@@ -466,6 +507,7 @@ async def render(
         try:
             raw = await render_personality_only(
                 PERSONALITY_SYSTEM_PROMPT, prompt, purpose=purpose, deadline_seconds=deadline,
+                model_key=model_key,
             )
         except CoordinatorDenied as e:
             log.info(
@@ -523,6 +565,14 @@ _UNSUPPORTED_PRESENT_STATE_PHRASES = (
     "you have open", "i'm looking at", "your coffee", "free time", "blank terminal",
     "your battery", "staring at", "hours staring", "battery is actually dead",
 )
+# General shape, not just "i can see your X" — also catches "I can see the
+# tabs glowing from here" (observed live, post-hardening): a claim of
+# currently perceiving specific desktop content, regardless of whether it's
+# phrased as "your" or "the".
+_VISUAL_PERCEPTION_CLAIM_RE = re.compile(
+    r"\bi can see (the|your)\b|\bi see (the|your)\b[^.!?]{0,20}\b(tab|screen|window|desktop|terminal|browser)\b",
+    re.I,
+)
 # Only checked when a nudge was NOT authorized this turn (see
 # procrastination_nudge_authorized) — an authorized nudge is allowed to use
 # this vocabulary, since a real caller already decided it applies.
@@ -550,6 +600,27 @@ _ADVICE_COLUMN_PHRASES = (
 _FALSE_CAPABILITY_PHRASES = (
     "can't touch anything here", "i have no capabilities", "i can never do anything",
     "i'm just text", "i'm not a script that gets to do things",
+)
+
+# General co-occurrence check, not a copy of the audition's exact wording:
+# a surveillance/tracking verb ANYWHERE in the reply plus a duration/screen-
+# time noun ANYWHERE in the reply — catches "recording the exact duration
+# you spend on this screen", "I track how long you've been on this
+# screen", "I've been logging your screen time", etc., regardless of word
+# order or distance between the two. Observed live in the qwen3.5:9b
+# audition (scripts/conversation_bench/results/20260903T171724Z/,
+# C_repeated_ack run_3): "I'm made of eyes... recording the exact duration
+# you spend on this screen isn't an opinion; it's just data." Huginn has
+# no such capability in this conversation — a false-capability claim in
+# the same family as _FALSE_CAPABILITY_PHRASES, just checked structurally
+# (verb + subject co-occurrence) rather than as a fixed phrase list, since
+# the wording varies more than a short list could cover.
+_SURVEILLANCE_VERB_RE = re.compile(
+    r"\b(record(?:ing)?|track(?:ing)?|log(?:ging)?|monitor(?:ing)?|clock(?:ing)?)\b", re.I,
+)
+_SURVEILLANCE_SUBJECT_RE = re.compile(
+    r"\bhow long\b|\bduration\b|\bscreen ?time\b|\byour screen\b|\btime you(?:'ve| have|'re| are)?\s+spen(?:d|t)\b",
+    re.I,
 )
 
 _CAPABILITY_SUMMARY_CLAIMS = (
@@ -624,11 +695,17 @@ def _validate_direct_social(
     low = text.lower()
     if any(m in low for m in _KNOWN_MISSPELLINGS):
         return "known_misspelling"
+    if _MUNINN_MISSPELLING_RE.search(low):
+        return "known_misspelling"
+    if _CALLS_NATHAN_RAVEN_RE.search(low):
+        return "calls_nathan_a_raven"
     if any(re.search(rf"\b{re.escape(word)}\b", low) for word in _BANNED_ACTION_VERBS):
         return "implies_action_outcome"
     if any(p in low for p in _FABRICATED_MEMORY_PHRASES):
         return "fabricated_memory_claim"
     if any(p in low for p in _UNSUPPORTED_PRESENT_STATE_PHRASES):
+        return "invented_present_state"
+    if _VISUAL_PERCEPTION_CLAIM_RE.search(low):
         return "invented_present_state"
     if not procrastination_nudge_authorized and any(p in low for p in _UNAUTHORIZED_PROCRASTINATION_PHRASES):
         return "unauthorized_procrastination_language"
@@ -638,6 +715,8 @@ def _validate_direct_social(
         return "advice_column_voice"
     if any(p in low for p in _FALSE_CAPABILITY_PHRASES):
         return "false_capability_claim"
+    if _SURVEILLANCE_VERB_RE.search(low) and _SURVEILLANCE_SUBJECT_RE.search(low):
+        return "fabricated_surveillance_capability"
     if prior_response and _is_substantially_repetitive(text, prior_response):
         return "substantially_repetitive"
     return None
@@ -688,6 +767,7 @@ async def render_direct_social(
     procrastination_nudge_authorized: bool = False,
     available_context_claims: tuple = (),
     deadline_seconds: "float | None" = None,
+    model_key: str = DIRECT_SOCIAL_MODEL_KEY,
 ) -> DirectSocialResult:
     """Renders one direct-conversation reply. Never raises for expected
     failure modes. Validation failure after one retry returns ok=False —
@@ -717,20 +797,22 @@ async def render_direct_social(
         if attempt > 0:
             p += (
                 "\n\nYour previous reply was invalid (too long, claimed an action, invented a "
-                "present-state fact, used unauthorized procrastination language, explained a "
-                "metaphor instead of embodying it, slipped into advice-column phrasing, or "
-                "substantially repeated your last reply). Answer freshly and plainly instead."
+                "present-state fact, claimed a tracking/monitoring capability you don't have, "
+                "used unauthorized procrastination language, explained a metaphor instead of "
+                "embodying it, slipped into advice-column phrasing, misspelled Huginn or Muninn, "
+                "called Nathan a raven, or substantially repeated your last reply). Answer "
+                "freshly and plainly instead."
             )
         try:
             raw = await render_personality_only(
                 DIRECT_SOCIAL_SYSTEM_PROMPT, p, purpose=Purpose.DIRECT, deadline_seconds=deadline,
-                max_tokens=_max_tokens_for(subtype),
+                max_tokens=_max_tokens_for(subtype), model_key=model_key,
             )
         except CoordinatorDenied as e:
-            log.info("direct_social denied: attempt=%d denial=%s", attempt, e.denial.value)
+            log.info("direct_social denied: attempt=%d model_key=%s denial=%s", attempt, model_key, e.denial.value)
             return DirectSocialResult(False, None, f"coordinator_denied:{e.denial.value}")
         except Exception as e:
-            log.info("direct_social error: attempt=%d error_type=%s", attempt, type(e).__name__)
+            log.info("direct_social error: attempt=%d model_key=%s error_type=%s", attempt, model_key, type(e).__name__)
             return DirectSocialResult(False, None, "error")
 
         text = raw.strip()
@@ -739,9 +821,9 @@ async def render_direct_social(
             prior_response=prior_response,
         )
         if problem is None:
-            log.info("direct_social ok: attempt=%d chars=%d subtype=%s", attempt, len(text), subtype_label(subtype))
+            log.info("direct_social ok: attempt=%d model_key=%s chars=%d subtype=%s", attempt, model_key, len(text), subtype_label(subtype))
             return DirectSocialResult(True, text, "rendered")
-        log.info("direct_social validation failed: attempt=%d problem=%s subtype=%s", attempt, problem, subtype_label(subtype))
+        log.info("direct_social validation failed: attempt=%d model_key=%s problem=%s subtype=%s", attempt, model_key, problem, subtype_label(subtype))
 
     return DirectSocialResult(False, None, "validation_failed")
 

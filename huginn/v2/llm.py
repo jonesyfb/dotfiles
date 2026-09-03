@@ -339,7 +339,7 @@ async def unload_model(model: str) -> None:
             return
 
 
-async def _render_personality_raw(system_prompt: str, user_prompt: str, max_tokens: "int | None" = None) -> str:
+async def _render_personality_raw(system_prompt: str, user_prompt: str, model: str, max_tokens: "int | None" = None) -> str:
     """Raw primitive — no lock, no coordinator routing, no cloud path
     anywhere in this function. Use render_personality_only() instead.
 
@@ -349,6 +349,7 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str, max_toke
     which already disables it for the same reason). With it off: ~0.3s,
     24 tokens, same voice quality. This is the difference between a snappy
     ambient renderer and one that blows the deadline on every single call.
+    Applies regardless of which model this call targets.
 
     `max_tokens` (Ollama's `num_predict`) is a generation-time budget, not a
     substitute for post-generation validation — it stops an over-long reply
@@ -359,7 +360,7 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str, max_toke
     if max_tokens is not None:
         options["num_predict"] = max_tokens
     payload = {
-        "model": MODELS["personality"]["model"],
+        "model": model,
         "messages": [
             {"role": "system", "content": system_prompt},
             {"role": "user", "content": user_prompt},
@@ -380,22 +381,32 @@ async def render_personality_only(
     purpose: Purpose = Purpose.AMBIENT,
     deadline_seconds: "float | None" = None,
     max_tokens: "int | None" = None,
+    model_key: str = "personality",
 ) -> str:
     """Structurally cloud-isolated, like judge_local_only — no `prefer`
     argument and no code path to _judge_claude/stream_claude anywhere in
-    this function. Scheduled through the coordinator as
-    RequestClass.RESIDENT_PERSONALITY, which is always game-mode-admitted
-    (unlike ordinary/vision/maintenance classes) since the personality
-    model is the one thing game mode still permits. Raises CoordinatorDenied
-    on denial so callers keep the same except-and-handle shape used
-    elsewhere (judge_local_only, unload_model)."""
+    this function. `model_key` defaults to "personality" (qwen3.5:4b,
+    always game-mode-admitted) for full backward compatibility with every
+    existing caller; passing a different key (e.g. "direct_social",
+    qwen3.5:9b) schedules through RequestClass.ORDINARY_LOCAL_REASONING
+    instead — NOT game-mode-admitted, same rule stream_chat() already
+    applies for model_key selection, so a caller can never accidentally
+    reach a bigger model during game mode even on a bug elsewhere. Raises
+    CoordinatorDenied on denial so callers keep the same except-and-handle
+    shape used elsewhere (judge_local_only, unload_model)."""
+    model = MODELS[model_key]["model"]
+    request_class = (
+        RequestClass.RESIDENT_PERSONALITY if model_key == "personality"
+        else RequestClass.ORDINARY_LOCAL_REASONING
+    )
+
     async def _fn(emit):
-        return await _render_personality_raw(system_prompt, user_prompt, max_tokens=max_tokens)
+        return await _render_personality_raw(system_prompt, user_prompt, model, max_tokens=max_tokens)
 
     request = InferenceRequest(
-        request_class=RequestClass.RESIDENT_PERSONALITY,
+        request_class=request_class,
         purpose=purpose,
-        model=MODELS["personality"]["model"],
+        model=model,
         fn=_fn,
         deadline_seconds=deadline_seconds,
         label="personality-render",
