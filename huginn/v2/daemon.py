@@ -256,7 +256,7 @@ async def random_chime_worker() -> None:
                 facts=_parse_stats(stats),
                 severity=decision.severity,
                 interruption_reason=decision.reason,
-                max_length=200,
+                max_length=120,
                 prohibited_additions=("diagnosis", "recommendation", "urgency", "an action to take"),
                 interaction_mode=snapshot.interaction.mode,
             )
@@ -304,25 +304,22 @@ def _parse_stats(raw: str) -> dict:
 async def _notify_task_complete(label: str, result: str) -> None:
     """Renders a task-completion notification in Huginn's voice. Unlike the
     periodic ambient chime, this is meaningful content someone may actually
-    be waiting on — a rendering failure falls back to the old deterministic
-    message instead of going silent."""
-    fallback = (f"Task complete: {label}", result[:100])
+    be waiting on — on a flavor-render failure this publishes the
+    deterministic factual sentence (always computed by personality.render(),
+    independent of the model call) instead of going silent."""
     try:
         request = personality.PersonalityRequest(
             purpose="task_complete",
             facts={"task": label, "result_preview": result[:100]},
+            protected_keys=("task",),
             severity="info",
-            max_length=200,
-            protected_values=(label,),
             interaction_mode="ambient",
         )
         render_result = await personality.render(request, purpose=Purpose.AMBIENT)
-        if render_result.ok:
-            _emit_chime("huginn", render_result.text)
-        else:
-            _emit_chime(*fallback)
+        text = render_result.text if render_result.ok else render_result.deterministic
+        _emit_chime("huginn", text)
     except Exception:
-        _emit_chime(*fallback)
+        _emit_chime("huginn", f"Task complete: {label}")
 
 
 def _emit_chime(title: str, body: str, notif_type: str = "info") -> None:
@@ -448,7 +445,6 @@ async def _handle_bash_chime(
     render failure rather than going silent."""
     failed = exit_code != 0
     short_cmd = cmd[:60] + ("…" if len(cmd) > 60 else "")
-    fallback = f"Command {'failed' if failed else 'finished'} (exit {exit_code}) after {elapsed:.0f}s: {short_cmd}"
 
     try:
         request = personality.PersonalityRequest(
@@ -459,16 +455,15 @@ async def _handle_bash_chime(
                 "elapsed_seconds": f"{elapsed:.0f}",
                 "outcome": "failed" if failed else "finished (slow)",
             },
+            protected_keys=("command", "exit_code", "elapsed_seconds"),
             severity="notice" if failed else "info",
-            max_length=200,
-            protected_values=(short_cmd,),
             prohibited_additions=("a fix", "a diagnosis of the cause") if failed else (),
             interaction_mode="ambient",
         )
         render_result = await personality.render(request, purpose=Purpose.AMBIENT)
-        response = render_result.text if render_result.ok else fallback
+        response = render_result.text if render_result.ok else render_result.deterministic
     except Exception:
-        response = fallback
+        response = f"Command {'failed' if failed else 'finished'} (exit {exit_code}) after {elapsed:.0f}s: {short_cmd}"
 
     _emit_chime("Huginn", response[:200])
     await send(writer, {"type": "done"})

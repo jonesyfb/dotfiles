@@ -12,9 +12,27 @@ via qwen3.5:4b, through the coordinator. This module owns wording only:
   path to _judge_claude/stream_claude at all, same guarantee as
   judge_local_only for the gatekeeper).
 
-Exact numbers, paths, commands, and other protected values are validated
-mechanically after generation, not trusted from the prompt alone — an LLM
-follows instructions probabilistically, not by contract.
+Presentation structure (hardened after the 2026-09-03 acceptance baseline —
+see scripts/personality_bench/results/20260903T052457Z/report.md, Finding 1):
+a small model asked to reproduce exact numbers/paths/commands/identifiers
+character-for-character loses that contest often enough to matter (4/6
+protected-value scenarios failed in the baseline — spelled-out numbers,
+re-cased proper nouns, paraphrased error strings). So it is no longer asked
+to. Every render() call now produces two genuinely separate things:
+
+  - `flavor`        — short, model-authored mood/voice text. Never contains
+                       a protected value; validated to contain no digits at
+                       all, and rejected if it accidentally leaks one anyway.
+  - `deterministic` — a plain-English factual sentence assembled by CODE
+                       from request.facts/severity/reasoner_conclusion/
+                       code_block, verbatim, with no model involved. Always
+                       computed, even when flavor generation fails — this is
+                       what a caller publishes instead of the flavor on
+                       failure, and what makes a critical warning legible
+                       with all personality text stripped away.
+
+`text` is the two joined for display, wherever a caller only wants one
+string (existing chime/notification consumers all just want a body string).
 """
 from __future__ import annotations
 
@@ -39,66 +57,88 @@ _THEATRICAL_MARKERS = ("*", "[", "]")
 @dataclass(frozen=True)
 class PersonalityRequest:
     purpose: str                                   # event/opportunity type, e.g. "periodic_observation", "task_complete", "procrastination_nudge"
-    facts: dict = field(default_factory=dict)       # authoritative facts as flat key -> string value, shown to the model verbatim
+    facts: dict = field(default_factory=dict)       # authoritative facts, code-owned ground truth
+    protected_keys: tuple = ()                      # keys in `facts` whose exact values the model is never shown and never asked to reproduce
+    code_block: "str | None" = None                 # optional verbatim command/error block — code-owned, never shown to the model, appended as-is
     severity: str = "info"                          # "info" | "notice" | "critical" — reuses ambient.SEVERITIES vocabulary
     interruption_reason: str = ""                   # why speaking now was already approved (tone context only, not re-litigated here)
-    max_length: int = 200                            # character cap, validated after generation
+    max_length: int = 120                           # character cap on the model-authored flavor portion only
     prohibited_additions: tuple = ()                 # things the model must not introduce, e.g. ("diagnosis", "urgency")
-    protected_values: tuple = ()                     # exact substrings that MUST appear verbatim if the render references them at all
-    reasoner_conclusion: "str | None" = None         # optional stronger-model output to phrase, preserving its uncertainty exactly
+    reasoner_conclusion: "str | None" = None         # optional stronger-model output — composed verbatim into the deterministic sentence, never shown to the model to paraphrase
     interaction_mode: str = "ambient"                # tone hint only — not a permission signal, that's already been checked upstream
+    action_metadata: "dict | None" = None            # optional structured data for a future UI action — untouched by personality rendering, passed through as-is
 
 
 @dataclass(frozen=True)
 class RenderResult:
     ok: bool
-    text: "str | None"
-    reason: str  # "rendered" | "coordinator_denied:<denial>" | "error" | "validation_failed"
+    text: "str | None"          # flavor + deterministic, joined for display; None only when ok=False
+    flavor: "str | None"        # model-authored portion alone (may be "" — a deliberately empty flavor is valid)
+    deterministic: str          # code-composed factual sentence — ALWAYS present, even on failure
+    reason: str                 # "rendered" | "coordinator_denied:<denial>" | "error" | "validation_failed"
+    action_metadata: "dict | None" = None
+
+
+def _compose_deterministic(request: PersonalityRequest) -> str:
+    """Pure, code-owned. No model involved — this is what stays true (and
+    legible) if all personality text is stripped away."""
+    bits = []
+    if request.severity == "critical":
+        bits.append("CRITICAL:")
+    fact_bits = [f"{key.replace('_', ' ')}: {value}" for key, value in request.facts.items()]
+    if fact_bits:
+        bits.append("; ".join(fact_bits))
+    if request.reasoner_conclusion:
+        bits.append(request.reasoner_conclusion)
+    sentence = " ".join(b for b in bits if b).strip()
+    if request.code_block:
+        sentence = f"{sentence}\n{request.code_block}" if sentence else request.code_block
+    return sentence
 
 
 def _build_user_prompt(request: PersonalityRequest) -> str:
     lines = [f"Event type: {request.purpose}", f"Severity: {request.severity}"]
     if request.interruption_reason:
         lines.append(f"Why this is being said now (already decided, do not re-justify it): {request.interruption_reason}")
-    if request.facts:
-        lines.append("Authoritative facts — do not invent, alter, omit the meaning of, or contradict these:")
-        for key, value in request.facts.items():
+    visible_facts = {k: v for k, v in request.facts.items() if k not in request.protected_keys}
+    if visible_facts:
+        lines.append("Context, for tone only — do not restate these as exact values:")
+        for key, value in visible_facts.items():
             lines.append(f"  - {key}: {value}")
-    if request.reasoner_conclusion:
-        lines.append(f"A more capable model already concluded: {request.reasoner_conclusion}")
-        lines.append("Preserve its uncertainty exactly — if it hedged, your line must hedge too.")
+    if request.protected_keys:
+        lines.append(
+            "Some exact values for this event (numbers, names, paths, commands, errors) are "
+            "withheld from you on purpose — the system will show them to the user separately, "
+            "verbatim. Do not guess, restate, or invent them."
+        )
     if request.prohibited_additions:
         lines.append("Do not add any of: " + ", ".join(request.prohibited_additions))
-    if request.protected_values:
-        lines.append(
-            "These exact values MUST appear character-for-character if you reference "
-            "them at all: " + ", ".join(request.protected_values)
-        )
     lines.append(f"Current interaction mode: {request.interaction_mode} (a tone hint only)")
     lines.append(f"Maximum length: {request.max_length} characters.")
     lines.append(
-        "Respond with ONLY the line Huginn would say — no preamble, no quotes, "
-        "no explanation, no label. If there's nothing worth saying, respond with "
-        "an empty line."
+        "Respond with ONLY a short mood/voice reaction — no numbers, no exact names, no paths, "
+        "no commands, no error text, no dates, no identifiers; those are shown separately by the "
+        "system. No preamble, no quotes, no label. If there's nothing worth adding, respond with "
+        "an empty line — that is a completely valid answer."
     )
     return "\n".join(lines)
 
 
-def _validate(text: str, request: PersonalityRequest) -> "str | None":
-    """Returns None if the rendered text is acceptable, else a short
-    machine-readable problem code — never the text itself in the reason,
-    callers may log this code freely."""
-    if not text.strip():
-        return "empty"
+def _validate_flavor(text: str, request: PersonalityRequest, protected_literal_values: tuple) -> "str | None":
+    """Returns None if the flavor text is acceptable, else a short
+    machine-readable problem code. An empty flavor is NOT a problem — the
+    deterministic sentence carries the real content regardless."""
     if len(text) > request.max_length:
         return "too_long"
     if any(marker in text for marker in _THEATRICAL_MARKERS):
         return "theatrical_formatting"
     if text.strip().lower().startswith("huginn:"):
         return "self_prefixed"
-    for value in request.protected_values:
-        if value not in text:
-            return "missing_protected_value"
+    if any(ch.isdigit() for ch in text):
+        return "contains_digits"
+    for value in protected_literal_values:
+        if value and value in text:
+            return "leaked_protected_value"
     return None
 
 
@@ -109,21 +149,26 @@ async def render(
     deadline_seconds: "float | None" = None,
 ) -> RenderResult:
     """Renders `request` via qwen3.5:4b. Never raises for expected failure
-    modes (coordinator denial, validation failure, empty output) — those
-    all come back as RenderResult(ok=False, ...) with a reason the caller
-    can act on (silence for disposable ambient content, a deterministic
-    fallback message for anything more consequential). An unexpected
-    exception is caught too; this module must never take the daemon down."""
+    modes (coordinator denial, validation failure) — those come back as
+    RenderResult(ok=False, ...) with `deterministic` still populated, so a
+    caller can publish the deterministic factual notification for
+    actionable content or stay silent for disposable ambient content, per
+    its own policy. An unexpected exception is caught too; this module must
+    never take the daemon down."""
     deadline = deadline_seconds if deadline_seconds is not None else AMBIENT_RENDER_DEADLINE_SECONDS
+    deterministic = _compose_deterministic(request)
+    protected_literal_values = tuple(
+        str(request.facts[k]) for k in request.protected_keys if k in request.facts
+    )
     base_prompt = _build_user_prompt(request)
 
     for attempt in range(PERSONALITY_RENDER_MAX_RETRIES + 1):
         prompt = base_prompt
         if attempt > 0:
             prompt += (
-                "\n\nYour previous attempt was invalid (too long, missing a required "
-                "exact value, or contained formatting like asterisks/brackets). "
-                "Be stricter this time: plain prose only, no formatting, no missing values."
+                "\n\nYour previous attempt was invalid (too long, contained a digit, contained "
+                "formatting like asterisks/brackets, or repeated a withheld exact value). Be "
+                "stricter this time: plain prose only, no digits, no formatting."
             )
         try:
             raw = await render_personality_only(
@@ -134,25 +179,26 @@ async def render(
                 "personality render denied: purpose=%s severity=%s attempt=%d denial=%s",
                 request.purpose, request.severity, attempt, e.denial.value,
             )
-            return RenderResult(False, None, f"coordinator_denied:{e.denial.value}")
+            return RenderResult(False, None, None, deterministic, f"coordinator_denied:{e.denial.value}", request.action_metadata)
         except Exception as e:
             log.info(
                 "personality render error: purpose=%s severity=%s attempt=%d error_type=%s",
                 request.purpose, request.severity, attempt, type(e).__name__,
             )
-            return RenderResult(False, None, "error")
+            return RenderResult(False, None, None, deterministic, "error", request.action_metadata)
 
-        text = raw.strip()
-        problem = _validate(text, request)
+        flavor = raw.strip()
+        problem = _validate_flavor(flavor, request, protected_literal_values)
         if problem is None:
             log.info(
-                "personality render ok: purpose=%s severity=%s attempt=%d chars=%d",
-                request.purpose, request.severity, attempt, len(text),
+                "personality render ok: purpose=%s severity=%s attempt=%d flavor_chars=%d",
+                request.purpose, request.severity, attempt, len(flavor),
             )
-            return RenderResult(True, text, "rendered")
+            text = f"{flavor} {deterministic}".strip() if flavor else deterministic
+            return RenderResult(True, text, flavor, deterministic, "rendered", request.action_metadata)
         log.info(
             "personality render validation failed: purpose=%s severity=%s attempt=%d problem=%s",
             request.purpose, request.severity, attempt, problem,
         )
 
-    return RenderResult(False, None, "validation_failed")
+    return RenderResult(False, None, None, deterministic, "validation_failed", request.action_metadata)

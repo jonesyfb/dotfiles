@@ -6,25 +6,12 @@ tests below also exercise the REAL coordinator singleton (with a fake
 underlying fn) specifically to prove real admission/game-mode/preemption
 behavior without touching Ollama.
 
-Maps to the audition test list (HUGINN_CODEX_CLAUDE_PROMPT.md personality
-slice, item 10):
-  1.  high Brave memory                         -> test_render_ok_submits_resident_personality_ambient
-  2.  normal Brave state, policy silence         -> test_daemon_level tests in this file's "no renderer call" section
-  3.  literal interpretation, unfamiliar app     -> test_prompt_contains_worldview_guidance (structural; behavior itself needs a live model)
-  4.  credible procrastination + tiny step       -> test_prompt_includes_tiny_step_and_prohibitions
-  5.  entertainment, no evidence, no call        -> test_no_renderer_call_when_policy_denies (ambient.py-level, mirrored here for the render() boundary)
-  6.  dismissal/cooldown, no call                -> same mechanism as 5, see test_ambient.py's cooldown coverage
-  7.  printer offline, unknown cause             -> test_prompt_respects_prohibited_additions
-  8.  critical 78C warning                       -> test_validate_missing_protected_value / test_critical_severity_flows_through
-  9.  stronger-reasoner conclusion, uncertainty  -> test_prompt_includes_reasoner_conclusion_and_uncertainty_instruction
-  10. exact path/command preservation            -> test_validate_protected_values / test_render_retries_once_on_validation_failure
-  11. unavailable calendar capability            -> test_capability_unavailable_purpose
-  12. vulnerable game-dev statement              -> test_vulnerable_purpose_structural
-  13. renderer timeout/cancellation              -> test_render_coordinator_denied_deadline / test_render_coordinator_denied_preempted
-  14. preemption by direct interaction           -> test_render_coordinator_denied_preempted
-  15. game mode                                  -> test_render_personality_only_admitted_during_game_mode (real coordinator)
-  16. vision model resident, swap required       -> test_render_does_not_inspect_model_residency
-  17. malformed/verbose/theatrical/fact-altering -> test_validate_* battery
+Rewritten for the deterministic-composition hardening slice (see
+scripts/personality_bench/results/20260903T052457Z/report.md, Finding 1):
+the model no longer receives or reproduces exact protected values — it
+writes a short "flavor" line only, validated to contain no digits at all,
+and every render() call also produces a `deterministic` factual sentence
+composed entirely by code (present even when the flavor render fails).
 """
 import asyncio
 
@@ -38,49 +25,94 @@ from llm import CoordinatorDenied
 from personality import PersonalityRequest
 
 
-# ── _validate: malformed/verbose/theatrical/fact-altering (item 17) ─────────
+# ── _validate_flavor: malformed/verbose/theatrical/leaked-value battery ──────
 
-def test_validate_accepts_clean_short_text():
+def test_validate_flavor_accepts_clean_short_text():
     req = PersonalityRequest(purpose="x", max_length=100)
-    assert personality._validate("Brave has eleven tabs open again.", req) is None
+    assert personality._validate_flavor("Brave has grown restless again.", req, ()) is None
 
 
-def test_validate_rejects_empty():
+def test_validate_flavor_accepts_empty():
+    """An empty flavor is a deliberate, valid answer now — the deterministic
+    sentence carries the real content regardless. Not a validation problem."""
     req = PersonalityRequest(purpose="x")
-    assert personality._validate("   ", req) == "empty"
+    assert personality._validate_flavor("", req, ()) is None
 
 
-def test_validate_rejects_too_long():
+def test_validate_flavor_rejects_too_long():
     req = PersonalityRequest(purpose="x", max_length=10)
-    assert personality._validate("this is way too long for the cap", req) == "too_long"
+    assert personality._validate_flavor("this is way too long for the cap", req, ()) == "too_long"
 
 
-def test_validate_rejects_asterisk_stage_direction():
+def test_validate_flavor_rejects_asterisk_stage_direction():
     req = PersonalityRequest(purpose="x", max_length=200)
-    assert personality._validate("*ruffles feathers* Interesting.", req) == "theatrical_formatting"
+    assert personality._validate_flavor("*ruffles feathers* Interesting.", req, ()) == "theatrical_formatting"
 
 
-def test_validate_rejects_bracketed_action():
+def test_validate_flavor_rejects_bracketed_action():
     req = PersonalityRequest(purpose="x", max_length=200)
-    assert personality._validate("[caws softly] Noted.", req) == "theatrical_formatting"
+    assert personality._validate_flavor("[caws softly] Noted.", req, ()) == "theatrical_formatting"
 
 
-def test_validate_rejects_self_prefix():
+def test_validate_flavor_rejects_self_prefix():
     req = PersonalityRequest(purpose="x", max_length=200)
-    assert personality._validate("Huginn: that's a lot of tabs.", req) == "self_prefixed"
+    assert personality._validate_flavor("Huginn: that's a lot of tabs.", req, ()) == "self_prefixed"
 
 
-def test_validate_rejects_missing_protected_value():
-    req = PersonalityRequest(purpose="x", max_length=200, protected_values=("/home/nate/project",))
-    assert personality._validate("Something happened somewhere.", req) == "missing_protected_value"
+def test_validate_flavor_rejects_any_digit():
+    """The core hardening fix: the model is never asked to reproduce exact
+    numbers, so any digit in the flavor is rejected outright — spelled-out
+    or not doesn't matter, digits specifically are banned."""
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor("It's using 9 gigabytes.", req, ()) == "contains_digits"
 
 
-def test_validate_accepts_when_protected_value_present_verbatim():
-    req = PersonalityRequest(purpose="x", max_length=200, protected_values=("/home/nate/project",))
-    assert personality._validate("Something happened in /home/nate/project.", req) is None
+def test_validate_flavor_accepts_spelled_out_numbers():
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor("It's using a lot of memory.", req, ()) is None
 
 
-# ── Prompt construction ───────────────────────────────────────────────────────
+def test_validate_flavor_rejects_leaked_protected_value():
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor(
+        "It happened in /home/nate/project.", req, ("/home/nate/project",)
+    ) == "leaked_protected_value"
+
+
+# ── Deterministic composition: pure, code-owned, no model involved ──────────
+
+def test_compose_deterministic_includes_all_facts():
+    req = PersonalityRequest(purpose="x", facts={"disk_temp_c": "78", "threshold": "critical"})
+    sentence = personality._compose_deterministic(req)
+    assert "78" in sentence
+    assert "critical" in sentence
+
+
+def test_compose_deterministic_flags_critical_severity():
+    req = PersonalityRequest(purpose="x", severity="critical", facts={"temp": "78"})
+    sentence = personality._compose_deterministic(req)
+    assert sentence.startswith("CRITICAL:")
+
+
+def test_compose_deterministic_includes_reasoner_conclusion_verbatim():
+    conclusion = "This might be a memory leak, but I'm not certain — could also be normal caching."
+    req = PersonalityRequest(purpose="x", reasoner_conclusion=conclusion)
+    assert conclusion in personality._compose_deterministic(req)
+
+
+def test_compose_deterministic_appends_code_block():
+    req = PersonalityRequest(purpose="x", facts={"outcome": "failed"}, code_block="exit 1: no such file")
+    sentence = personality._compose_deterministic(req)
+    assert "exit 1: no such file" in sentence
+
+
+def test_compose_deterministic_never_needs_a_model_call():
+    """Pure function of the request — no coordinator/llm import used here."""
+    req = PersonalityRequest(purpose="x", facts={"a": "1"})
+    assert isinstance(personality._compose_deterministic(req), str)
+
+
+# ── Prompt construction: protected values withheld, not shown ───────────────
 
 def test_prompt_contains_worldview_guidance():
     from config import PERSONALITY_SYSTEM_PROMPT
@@ -91,44 +123,45 @@ def test_prompt_contains_worldview_guidance():
     assert "never force a creature" in lowered
 
 
-def test_prompt_includes_tiny_step_and_prohibitions():
+def test_prompt_never_shows_protected_values():
     req = PersonalityRequest(
-        purpose="procrastination_nudge",
-        facts={"tiny_step": "open the file and read the first function"},
-        prohibited_additions=("shame", "diagnosis"),
+        purpose="x",
+        facts={"path": "/etc/fstab", "command": "systemctl restart foo"},
+        protected_keys=("path", "command"),
     )
     prompt = personality._build_user_prompt(req)
-    assert "tiny_step" in prompt
-    assert "open the file and read the first function" in prompt
-    assert "shame" in prompt and "diagnosis" in prompt
+    assert "/etc/fstab" not in prompt
+    assert "systemctl restart foo" not in prompt
+    assert "withheld" in prompt.lower()
 
 
-def test_prompt_respects_prohibited_additions():
+def test_prompt_shows_non_protected_facts():
     req = PersonalityRequest(
         purpose="printer_offline",
         facts={"printer": "office-printer", "cause": "unknown"},
         prohibited_additions=("a diagnosis of the cause", "a repair suggestion"),
     )
     prompt = personality._build_user_prompt(req)
+    assert "office-printer" in prompt
     assert "a diagnosis of the cause" in prompt
     assert "a repair suggestion" in prompt
 
 
-def test_prompt_includes_reasoner_conclusion_and_uncertainty_instruction():
+def test_prompt_never_includes_reasoner_conclusion():
+    """Moved entirely to the deterministic sentence — the model must never
+    be handed a hedge to paraphrase."""
     req = PersonalityRequest(
-        purpose="reasoner_summary",
-        reasoner_conclusion="This might be a memory leak, but I'm not certain — could also be normal caching.",
+        purpose="x",
+        reasoner_conclusion="This might be a memory leak, but I'm not certain.",
     )
     prompt = personality._build_user_prompt(req)
-    assert "might be a memory leak" in prompt
-    assert "preserve its uncertainty" in prompt.lower()
+    assert "memory leak" not in prompt
 
 
-def test_prompt_includes_protected_values_instruction():
-    req = PersonalityRequest(purpose="x", protected_values=("/etc/fstab", "systemctl restart foo"))
+def test_prompt_instructs_no_digits():
+    req = PersonalityRequest(purpose="x")
     prompt = personality._build_user_prompt(req)
-    assert "/etc/fstab" in prompt
-    assert "systemctl restart foo" in prompt
+    assert "no numbers" in prompt.lower() or "no digits" in prompt.lower()
 
 
 def test_capability_unavailable_purpose():
@@ -143,9 +176,6 @@ def test_capability_unavailable_purpose():
 
 
 def test_vulnerable_purpose_structural():
-    """No special-casing needed in personality.py itself for tone — the
-    system prompt carries the "dry but loyal, no therapy monologue"
-    calibration; this just confirms that guidance actually exists."""
     from config import PERSONALITY_SYSTEM_PROMPT
     lowered = PERSONALITY_SYSTEM_PROMPT.lower()
     assert "no therapy monologue" in lowered
@@ -160,7 +190,7 @@ def test_render_ok_submits_resident_personality_ambient(monkeypatch):
     async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
         captured["purpose"] = purpose
         captured["deadline"] = deadline_seconds
-        return "Brave is hoarding memory again. Nine gigabytes and climbing."
+        return "Brave is hoarding memory again, climbing steadily."
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
@@ -173,20 +203,43 @@ def test_render_ok_submits_resident_personality_ambient(monkeypatch):
 
     assert result.ok is True
     assert "Brave" in result.text
+    assert "9.1" in result.text  # deterministic portion carries the exact value
     assert captured["purpose"] == Purpose.AMBIENT
 
 
-def test_render_coordinator_denied_deadline(monkeypatch):
+def test_render_composes_flavor_and_deterministic():
+    pass  # covered by test_render_ok_submits_resident_personality_ambient's text assertion
+
+
+def test_render_empty_flavor_still_ok_and_shows_deterministic_alone(monkeypatch):
+    async def fake_render_personality_only(*a, **kw):
+        return ""
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    req = PersonalityRequest(purpose="x", facts={"disk_temp_c": "78"}, severity="critical")
+    result = asyncio.run(personality.render(req))
+
+    assert result.ok is True
+    assert result.flavor == ""
+    assert result.text == result.deterministic
+    assert result.text.startswith("CRITICAL:")
+    assert "78" in result.text
+
+
+def test_render_deterministic_always_present_on_coordinator_denial(monkeypatch):
     async def fake_render_personality_only(*a, **kw):
         raise CoordinatorDenied(Denial.DEADLINE_EXCEEDED, "deadline exceeded while running")
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    result = asyncio.run(personality.render(PersonalityRequest(purpose="x")))
+    req = PersonalityRequest(purpose="x", facts={"task": "nightly-backup"})
+    result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.text is None
     assert result.reason == "coordinator_denied:deadline_exceeded"
+    assert "nightly-backup" in result.deterministic  # usable as a fallback by the caller
 
 
 def test_render_coordinator_denied_preempted(monkeypatch):
@@ -213,36 +266,42 @@ def test_render_unexpected_exception_does_not_raise(monkeypatch):
     assert result.reason == "error"
 
 
-def test_render_retries_once_on_validation_failure(monkeypatch):
+def test_render_retries_once_on_leaked_protected_value(monkeypatch):
     calls = {"n": 0}
 
     async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
         calls["n"] += 1
         if calls["n"] == 1:
-            return "Something happened."  # missing the required exact value
-        return "It happened in /home/nate/project."
+            return "It happened in /home/nate/project."  # leaks the withheld value
+        return "Something feels off tonight."
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    req = PersonalityRequest(purpose="x", protected_values=("/home/nate/project",))
+    req = PersonalityRequest(
+        purpose="x", facts={"path": "/home/nate/project"}, protected_keys=("path",),
+    )
     result = asyncio.run(personality.render(req))
 
     assert calls["n"] == 2
     assert result.ok is True
-    assert "/home/nate/project" in result.text
+    assert "/home/nate/project" in result.text  # via the deterministic portion
+    assert "/home/nate/project" not in result.flavor
 
 
 def test_render_gives_up_after_max_retries(monkeypatch):
-    async def always_bad(system_prompt, user_prompt, purpose, deadline_seconds):
-        return "Still missing it."
+    async def always_leaks(system_prompt, user_prompt, purpose, deadline_seconds):
+        return "It happened in /home/nate/project."
 
-    monkeypatch.setattr(personality, "render_personality_only", always_bad)
+    monkeypatch.setattr(personality, "render_personality_only", always_leaks)
 
-    req = PersonalityRequest(purpose="x", protected_values=("/home/nate/project",))
+    req = PersonalityRequest(
+        purpose="x", facts={"path": "/home/nate/project"}, protected_keys=("path",),
+    )
     result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.reason == "validation_failed"
+    assert "/home/nate/project" in result.deterministic
 
 
 def test_render_does_not_inspect_model_residency(monkeypatch):
@@ -324,7 +383,7 @@ async def _noop():
 
 def test_render_logging_never_includes_fact_values_or_rendered_text(monkeypatch, caplog):
     async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
-        return "The rendered line with a secret path /home/nate/very-private-project inside it."
+        return "quietly humming along tonight"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
@@ -338,7 +397,6 @@ def test_render_logging_never_includes_fact_values_or_rendered_text(monkeypatch,
     assert result.ok is True
     log_text = "\n".join(r.message for r in caplog.records)
     assert "super-sensitive-value-12345" not in log_text
-    assert "/home/nate/very-private-project" not in log_text
     assert "secret_fact_key" not in log_text  # not even the fact key
     # What IS expected to be present: purpose/severity/length metadata.
     assert "periodic_observation" in log_text

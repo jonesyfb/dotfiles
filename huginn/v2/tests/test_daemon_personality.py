@@ -38,8 +38,8 @@ def test_notify_task_complete_uses_rendered_text_on_success(monkeypatch):
 
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
         assert request.purpose == "task_complete"
-        assert "build-frontend" in request.protected_values
-        return RenderResult(True, "The frontend build finished. No drama this time.", "rendered")
+        assert "task" in request.protected_keys
+        return RenderResult(True, "The frontend build finished. No drama this time.", "No drama this time.", "task: build-frontend", "rendered")
 
     monkeypatch.setattr(personality, "render", fake_render)
 
@@ -49,19 +49,23 @@ def test_notify_task_complete_uses_rendered_text_on_success(monkeypatch):
     assert emitted["body"] == "The frontend build finished. No drama this time."
 
 
-def test_notify_task_complete_falls_back_on_render_failure(monkeypatch):
+def test_notify_task_complete_uses_deterministic_on_render_failure(monkeypatch):
+    """A failed flavor render still publishes the always-computed
+    deterministic factual sentence — task_complete is actionable content,
+    never silence."""
     emitted = {}
     monkeypatch.setattr(daemon, "_emit_chime", lambda title, body, *a, **kw: emitted.update(title=title, body=body))
 
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
-        return RenderResult(False, None, "coordinator_denied:deadline_exceeded")
+        return RenderResult(False, None, None, "task: build-frontend; result preview: webpack output here", "coordinator_denied:deadline_exceeded")
 
     monkeypatch.setattr(personality, "render", fake_render)
 
     asyncio.run(daemon._notify_task_complete("build-frontend", "webpack output here"))
 
-    assert emitted["title"] == "Task complete: build-frontend"
-    assert "webpack output here" in emitted["body"] or emitted["body"] == "webpack output here"[:100]
+    assert emitted["title"] == "huginn"
+    assert "build-frontend" in emitted["body"]
+    assert "webpack output here" in emitted["body"]
 
 
 def test_notify_task_complete_falls_back_on_unexpected_exception(monkeypatch):
@@ -75,7 +79,8 @@ def test_notify_task_complete_falls_back_on_unexpected_exception(monkeypatch):
 
     asyncio.run(daemon._notify_task_complete("build-frontend", "output"))
 
-    assert emitted["title"] == "Task complete: build-frontend"
+    assert emitted["title"] == "huginn"
+    assert "build-frontend" in emitted["body"]
 
 
 # ── _handle_bash_chime ─────────────────────────────────────────────────────────
@@ -98,7 +103,8 @@ def test_handle_bash_chime_uses_rendered_text_on_success(monkeypatch):
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
         assert request.purpose == "bash_event"
         assert request.severity == "notice"  # exit_code != 0
-        return RenderResult(True, "That command did not go well.", "rendered")
+        assert "command" in request.protected_keys
+        return RenderResult(True, "That command did not go well.", "That command did not go well.", "command: make build", "rendered")
 
     monkeypatch.setattr(personality, "render", fake_render)
 
@@ -108,14 +114,33 @@ def test_handle_bash_chime_uses_rendered_text_on_success(monkeypatch):
     assert emitted["body"] == "That command did not go well."
 
 
-def test_handle_bash_chime_falls_back_and_preserves_exact_command(monkeypatch):
+def test_handle_bash_chime_uses_deterministic_and_preserves_exact_command(monkeypatch):
     emitted = {}
     monkeypatch.setattr(daemon, "_emit_chime", lambda title, body, *a, **kw: emitted.update(title=title, body=body))
 
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
-        return RenderResult(False, None, "validation_failed")
+        return RenderResult(False, None, None, "rm -rf build/ exited with exit 2", "validation_failed")
 
     monkeypatch.setattr(personality, "render", fake_render)
+
+    writer = _FakeWriter()
+    asyncio.run(daemon._handle_bash_chime(writer, 2, 5.0, "rm -rf build/"))
+
+    assert "exit 2" in emitted["body"]
+    assert "rm -rf build/" in emitted["body"]
+
+
+def test_handle_bash_chime_falls_back_on_unexpected_exception(monkeypatch):
+    """The last-resort literal fallback only fires if personality.render()
+    itself raises, not on an ordinary validation_failed/denied result
+    (which already has a usable deterministic sentence)."""
+    emitted = {}
+    monkeypatch.setattr(daemon, "_emit_chime", lambda title, body, *a, **kw: emitted.update(title=title, body=body))
+
+    async def boom(request, *, purpose=Purpose.AMBIENT):
+        raise RuntimeError("boom")
+
+    monkeypatch.setattr(personality, "render", boom)
 
     writer = _FakeWriter()
     asyncio.run(daemon._handle_bash_chime(writer, 2, 5.0, "rm -rf build/"))
@@ -129,7 +154,7 @@ def test_handle_bash_chime_success_path_notice_vs_info_severity(monkeypatch):
 
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
         captured["severity"] = request.severity
-        return RenderResult(True, "Slow, but it finished.", "rendered")
+        return RenderResult(True, "Slow, but it finished.", "Slow, but it finished.", "outcome: finished (slow)", "rendered")
 
     monkeypatch.setattr(personality, "render", fake_render)
     monkeypatch.setattr(daemon, "_emit_chime", lambda *a, **kw: None)
@@ -179,7 +204,7 @@ def test_random_chime_worker_never_renders_when_policy_denies(monkeypatch):
 
     async def spy_render(request, *, purpose=Purpose.AMBIENT):
         render_calls["n"] += 1
-        return RenderResult(True, "should not happen", "rendered")
+        return RenderResult(True, "should not happen", "should not happen", "", "rendered")
 
     monkeypatch.setattr(personality, "render", spy_render)
 
@@ -224,7 +249,7 @@ def test_random_chime_worker_renders_with_ambient_purpose_when_policy_allows(mon
 
     async def spy_render(request, *, purpose=Purpose.AMBIENT):
         render_calls.append((request.purpose, purpose))
-        return RenderResult(True, "Two percent CPU. Suspiciously calm.", "rendered")
+        return RenderResult(True, "Suspiciously calm today.", "Suspiciously calm today.", "CPU: 2%; MEM: 1Gi", "rendered")
 
     monkeypatch.setattr(personality, "render", spy_render)
     monkeypatch.setattr(daemon, "_emit_chime", lambda *a, **kw: None)
