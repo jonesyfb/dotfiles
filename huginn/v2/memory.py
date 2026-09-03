@@ -90,6 +90,11 @@ def _init(c: sqlite3.Connection) -> None:
             text TEXT NOT NULL,
             ts   INTEGER DEFAULT (unixepoch())
         );
+        CREATE TABLE IF NOT EXISTS entity_identities (
+            key        TEXT PRIMARY KEY,
+            data       TEXT NOT NULL,
+            ts         INTEGER DEFAULT (unixepoch())
+        );
         CREATE TABLE IF NOT EXISTS ambient_snoozes (
             scope      TEXT PRIMARY KEY,
             expires_at REAL NOT NULL,
@@ -358,6 +363,36 @@ def recent_ambient_events(kind: str, within_seconds: int) -> list[dict]:
             (kind, within_seconds),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Entity lens: user-defined identity overrides ────────────────────────────────
+# Only user overrides ever land here — builtins live in code (entities.py) and
+# ephemeral literal-name inferences are never persisted at all.
+
+def get_entity_identity(key: str) -> dict | None:
+    with db() as c:
+        row = c.execute("SELECT data FROM entity_identities WHERE key=?", (key,)).fetchone()
+        return json.loads(row["data"]) if row else None
+
+
+def set_entity_identity(key: str, data: dict) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO entity_identities(key, data) VALUES(?,?) "
+            "ON CONFLICT(key) DO UPDATE SET data=excluded.data, ts=unixepoch()",
+            (key, json.dumps(data)),
+        )
+
+
+def delete_entity_identity(key: str) -> None:
+    with db() as c:
+        c.execute("DELETE FROM entity_identities WHERE key=?", (key,))
+
+
+def all_entity_identity_keys() -> list[str]:
+    with db() as c:
+        rows = c.execute("SELECT key FROM entity_identities").fetchall()
+        return [r["key"] for r in rows]
 
 
 # ── Ambient snooze/dismissal state ──────────────────────────────────────────────

@@ -54,6 +54,7 @@ import logging
 import re
 from dataclasses import dataclass, field
 
+import entities
 from config import (
     AMBIENT_RENDER_DEADLINE_SECONDS, PERSONALITY_RENDER_MAX_RETRIES,
     PERSONALITY_SYSTEM_PROMPT,
@@ -94,7 +95,8 @@ class PersonalityRequest:
     code_block: "str | None" = None                  # optional verbatim command/error block — code-owned, never shown to the model, appended as-is
     severity: str = "info"                           # "info" | "notice" | "critical" — reuses ambient.SEVERITIES vocabulary
     interruption_reason: str = ""                    # why speaking now was already approved (tone context only, not re-litigated here)
-    flavor_cues: dict = field(default_factory=dict)  # curated NON-exact hints shown to the model for tone only: subject, band, category, transition, tone, creature_hint
+    flavor_cues: dict = field(default_factory=dict)  # curated NON-exact hints shown to the model for tone only: subject, band, category, transition, tone, creature_hint, archetype, collective_form
+    forbidden_domains: tuple = ()                    # entity-lens forbidden metaphor domains (keys into entities.DOMAIN_VOCAB) — validated mechanically, not just requested
     max_length: int = 120                            # character cap on the model-authored flavor portion only
     max_sentences: "int | None" = None               # optional sentence-count cap on the flavor portion (e.g. 2 for nudges)
     prohibited_additions: tuple = ()                  # things the model must not introduce, e.g. ("diagnosis", "urgency")
@@ -303,22 +305,11 @@ def _present_unknown(request: PersonalityRequest) -> str:
 # that was actually a good, natural fit (Brave-as-predator for a memory
 # hog). Per that finding, category percentages are a diagnostic signal for
 # a human reviewer, not a target to mechanically optimize.
-_STYLE_CATEGORIES = {
-    "predator_consumption": ("lion", "pride", "cub", "hunt", "prey", "eat", "feast", "hoard", "den", "roar", "claw", "mouth", "devour"),
-    "weather_omen": ("storm", "omen", "sky", "thunder", "cloud", "wind", "weather", "portent"),
-    "machinery_noise": ("gear", "engine", "hum", "grind", "clank", "machine", "noise", "buzz", "whirr", "static"),
-    "territory_navigation": ("realm", "territory", "map", "border", "path", "route", "navigate", "compass", "shore"),
-    "messages_bureaucracy": ("inbox", "mail", "form", "queue", "paperwork", "ledger", "office", "memo", "clerk"),
-    "sleep_memory_ritual": ("sleep", "dream", "ritual", "rest", "wake", "vigil", "remember", "forget", "muninn"),
-    "mischief_rivalry": ("mischief", "trick", "rival", "sneak", "prank", "gossip"),
-}
-
-
 def _classify_style(flavor: str) -> str:
     if not flavor.strip():
         return "silent"
     low = flavor.lower()
-    for category, words in _STYLE_CATEGORIES.items():
+    for category, words in entities.DOMAIN_VOCAB.items():
         if any(w in low for w in words):
             return category
     return "plain"
@@ -364,7 +355,7 @@ def _build_user_prompt(request: PersonalityRequest) -> str:
     lines = [f"Event type: {request.event_family}"]
     if request.interruption_reason:
         lines.append(f"Why this is being said now (already decided, do not re-justify it): {request.interruption_reason}")
-    for key in ("subject", "band", "category", "transition", "tone", "creature_hint"):
+    for key in ("subject", "band", "category", "transition", "tone", "creature_hint", "archetype", "collective_form"):
         value = request.flavor_cues.get(key)
         if value:
             lines.append(f"{key}: {value}")
@@ -404,6 +395,11 @@ def _validate_flavor(text: str, request: PersonalityRequest, protected_literal_v
         sentence_count = len([s for s in re.split(r"[.!?]+", text) if s.strip()])
         if sentence_count > request.max_sentences:
             return "too_many_sentences"
+    if request.forbidden_domains:
+        for domain in request.forbidden_domains:
+            for word in entities.DOMAIN_VOCAB.get(domain, ()):
+                if re.search(rf"\b{re.escape(word)}\b", low):
+                    return "forbidden_domain_used"
     if any(re.search(rf"\b{re.escape(word)}\b", low) for word in _BANNED_ACTION_VERBS):
         return "implies_action_outcome"
     has_unknown = any(_is_unknown(v) for v in request.facts.values())
@@ -498,3 +494,4 @@ async def render(
         )
 
     return RenderResult(False, None, None, deterministic, "validation_failed", request.action_metadata)
+

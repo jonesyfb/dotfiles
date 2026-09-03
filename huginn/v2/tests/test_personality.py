@@ -141,6 +141,23 @@ def test_validate_flavor_allows_plain_text_when_not_executed():
     assert personality._validate_flavor(text, req, ()) is None
 
 
+# ── Entity-lens forbidden-domain enforcement (item: Docker never a lion) ────
+
+def test_validate_flavor_rejects_forbidden_domain_word():
+    req = PersonalityRequest(purpose="x", max_length=200, forbidden_domains=("predator_consumption",))
+    assert personality._validate_flavor("Docker's engine is roaring like a lion.", req, ()) == "forbidden_domain_used"
+
+
+def test_validate_flavor_allows_permitted_domain_word():
+    req = PersonalityRequest(purpose="x", max_length=200, forbidden_domains=("predator_consumption",))
+    assert personality._validate_flavor("Docker's engine is laboring hard tonight.", req, ()) is None
+
+
+def test_validate_flavor_no_forbidden_domains_means_no_restriction():
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor("The lion is restless.", req, ()) is None
+
+
 # ── Deterministic presenters: typed, natural, never a key/value dump ────────
 
 def test_present_resource_observation_brave_style():

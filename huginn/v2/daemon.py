@@ -17,6 +17,7 @@ from pathlib import Path
 
 import ambient
 import context
+import entities
 import personality
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
 from coordinator import Purpose, coordinator
@@ -275,13 +276,20 @@ async def random_chime_worker() -> None:
             if not decision.allowed:
                 continue
 
+            subject_name = facts.get("app") or facts.get("process")
+            identity = entities.resolve(subject_name) if subject_name else None
+            cues = entities.cues_for(identity) if identity else {"subject": "the system"}
+            cues["band"] = decision.severity
+            cues["category"] = "resource_check"
+
             request = personality.PersonalityRequest(
                 purpose=_AMBIENT_KIND,
                 event_family="resource_observation",
                 facts=facts,
                 severity=decision.severity,
                 interruption_reason=decision.reason,
-                flavor_cues={"subject": "the system", "band": decision.severity, "category": "resource_check"},
+                flavor_cues=cues,
+                forbidden_domains=identity.forbidden_domains if identity else (),
                 max_length=120,
                 prohibited_additions=("diagnosis", "recommendation", "urgency", "an action to take"),
                 interaction_mode=snapshot.interaction.mode,
