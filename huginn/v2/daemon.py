@@ -16,6 +16,7 @@ from pathlib import Path
 
 import ambient
 import context
+import personality
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
 from coordinator import Purpose, coordinator
 from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
@@ -220,7 +221,7 @@ async def task_worker() -> None:
                 out, _ = await asyncio.wait_for(proc.communicate(), timeout=600)
                 result = out.decode(errors="replace").strip()[-2000:]
                 update_task_status(task["id"], "done", result)
-                _emit_chime(f"Task complete: {task['label']}", result[:100])
+                await _notify_task_complete(task["label"], result)
             except asyncio.TimeoutError:
                 update_task_status(task["id"], "failed", "timeout")
             except Exception as e:
@@ -235,7 +236,10 @@ async def random_chime_worker() -> None:
     """Hourly loop: ask the ambient policy whether Huginn may make an
     unsolicited dry observation right now. The policy — not a dice roll —
     decides via cooldown/budget/dedup/interaction-mode/attention state; a
-    denial here cannot be overridden by anything generated below."""
+    denial here cannot be overridden by anything generated below. Wording
+    comes from the narrow personality renderer (qwen3.5:4b), not a raw
+    freeform chat completion — it only ever sees the parsed stats facts,
+    never the full Runtime Context Engine snapshot or SYSTEM_PROMPT."""
     await asyncio.sleep(60)  # settle after startup
     while True:
         await asyncio.sleep(3600)
@@ -247,24 +251,22 @@ async def random_chime_worker() -> None:
                 continue
 
             stats = await _run_stats()
-            prompt = (
-                f"System stats: {stats}\n\n"
-                "Make one dry, unprompted observation in Huginn's voice. "
-                "One sentence max. No preamble. Don't explain what you're doing."
+            request = personality.PersonalityRequest(
+                purpose=_AMBIENT_KIND,
+                facts=_parse_stats(stats),
+                severity=decision.severity,
+                interruption_reason=decision.reason,
+                max_length=200,
+                prohibited_additions=("diagnosis", "recommendation", "urgency", "an action to take"),
+                interaction_mode=snapshot.interaction.mode,
             )
-            messages = [
-                {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
-            ]
-            response = ""
-            async for ev in stream_chat(messages, "fast", purpose=Purpose.AMBIENT):
-                if ev["type"] == "token":
-                    response += ev["content"]
-                elif ev["type"] == "done":
-                    break
-            response = response.strip()
-            if not response:
+            result = await personality.render(request, purpose=Purpose.AMBIENT)
+            if not result.ok:
+                # Noncritical ambient content: silence on failure, never a
+                # deterministic fallback chime — there's nothing anyone is
+                # waiting to hear here.
                 continue
+            response = result.text
 
             # Re-check with the actual generated text so dedup can run
             # against it — everything else in the snapshot is unchanged
@@ -285,6 +287,42 @@ async def random_chime_worker() -> None:
 async def _run_stats() -> str:
     from tools import run_tool
     return await run_tool("system_stats", {})
+
+
+def _parse_stats(raw: str) -> dict:
+    """system_stats' output is already "KEY:value" lines — turn it into a
+    flat facts dict instead of handing the raw blob to the renderer as
+    freeform prompt text."""
+    facts = {}
+    for line in raw.splitlines():
+        if ":" in line:
+            key, value = line.split(":", 1)
+            facts[key.strip()] = value.strip()
+    return facts
+
+
+async def _notify_task_complete(label: str, result: str) -> None:
+    """Renders a task-completion notification in Huginn's voice. Unlike the
+    periodic ambient chime, this is meaningful content someone may actually
+    be waiting on — a rendering failure falls back to the old deterministic
+    message instead of going silent."""
+    fallback = (f"Task complete: {label}", result[:100])
+    try:
+        request = personality.PersonalityRequest(
+            purpose="task_complete",
+            facts={"task": label, "result_preview": result[:100]},
+            severity="info",
+            max_length=200,
+            protected_values=(label,),
+            interaction_mode="ambient",
+        )
+        render_result = await personality.render(request, purpose=Purpose.AMBIENT)
+        if render_result.ok:
+            _emit_chime("huginn", render_result.text)
+        else:
+            _emit_chime(*fallback)
+    except Exception:
+        _emit_chime(*fallback)
 
 
 def _emit_chime(title: str, body: str, notif_type: str = "info") -> None:
@@ -401,26 +439,38 @@ async def handle_connection(reader: asyncio.StreamReader, writer: asyncio.Stream
 async def _handle_bash_chime(
     writer: asyncio.StreamWriter, exit_code: int, elapsed: float, cmd: str
 ) -> None:
+    """The bash hook (scripts/huginn-bash.sh) fires this fully detached —
+    `&>/dev/null &` — so nothing ever reads the streamed tokens this used
+    to send; only the resulting notification (_emit_chime) is ever seen.
+    Renders via the narrow personality path instead of a raw SYSTEM_PROMPT
+    chat completion. A failed/slow command is actionable information, not
+    disposable ambient content — falls back to a deterministic message on
+    render failure rather than going silent."""
+    failed = exit_code != 0
     short_cmd = cmd[:60] + ("…" if len(cmd) > 60 else "")
-    if exit_code != 0:
-        prompt = f"Command failed (exit {exit_code}) after {elapsed:.0f}s: {short_cmd}"
-    else:
-        prompt = f"Long command finished after {elapsed:.0f}s: {short_cmd}. Comment briefly."
+    fallback = f"Command {'failed' if failed else 'finished'} (exit {exit_code}) after {elapsed:.0f}s: {short_cmd}"
 
-    model_key = route_model(prompt)
-    messages = [
-        {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": prompt},
-    ]
-    response = ""
-    async for ev in stream_chat(messages, model_key):
-        if ev["type"] == "token":
-            response += ev["content"]
-            await send(writer, {"type": "token", "content": ev["content"]})
-        elif ev["type"] == "done":
-            break
-    if response:
-        _emit_chime("Huginn", response[:200])
+    try:
+        request = personality.PersonalityRequest(
+            purpose="bash_event",
+            facts={
+                "command": short_cmd,
+                "exit_code": str(exit_code),
+                "elapsed_seconds": f"{elapsed:.0f}",
+                "outcome": "failed" if failed else "finished (slow)",
+            },
+            severity="notice" if failed else "info",
+            max_length=200,
+            protected_values=(short_cmd,),
+            prohibited_additions=("a fix", "a diagnosis of the cause") if failed else (),
+            interaction_mode="ambient",
+        )
+        render_result = await personality.render(request, purpose=Purpose.AMBIENT)
+        response = render_result.text if render_result.ok else fallback
+    except Exception:
+        response = fallback
+
+    _emit_chime("Huginn", response[:200])
     await send(writer, {"type": "done"})
 
 

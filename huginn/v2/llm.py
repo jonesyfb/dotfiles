@@ -16,7 +16,10 @@ from typing import AsyncIterator
 
 import httpx
 
-from config import GAME_MODE_FLAG, GATE_JUDGE_TIMEOUT_SECONDS, MODELS, OLLAMA_BASE, SYSTEM_PROMPT
+from config import (
+    GAME_MODE_FLAG, GATE_JUDGE_TIMEOUT_SECONDS, MODELS, OLLAMA_BASE,
+    PERSONALITY_RENDER_TIMEOUT_SECONDS, SYSTEM_PROMPT,
+)
 from coordinator import Denial, InferenceRequest, Purpose, RequestClass, coordinator
 
 
@@ -334,6 +337,57 @@ async def unload_model(model: str) -> None:
     async for event in coordinator.submit(request):
         if event.kind in ("done", "denied"):
             return
+
+
+async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
+    """Raw primitive — no lock, no coordinator routing, no cloud path
+    anywhere in this function. Use render_personality_only() instead."""
+    payload = {
+        "model": MODELS["personality"]["model"],
+        "messages": [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        "stream": False,
+        "options": {"temperature": 0.7},
+    }
+    async with httpx.AsyncClient(timeout=PERSONALITY_RENDER_TIMEOUT_SECONDS) as client:
+        r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+        r.raise_for_status()
+        return r.json().get("message", {}).get("content", "")
+
+
+async def render_personality_only(
+    system_prompt: str,
+    user_prompt: str,
+    purpose: Purpose = Purpose.AMBIENT,
+    deadline_seconds: "float | None" = None,
+) -> str:
+    """Structurally cloud-isolated, like judge_local_only — no `prefer`
+    argument and no code path to _judge_claude/stream_claude anywhere in
+    this function. Scheduled through the coordinator as
+    RequestClass.RESIDENT_PERSONALITY, which is always game-mode-admitted
+    (unlike ordinary/vision/maintenance classes) since the personality
+    model is the one thing game mode still permits. Raises CoordinatorDenied
+    on denial so callers keep the same except-and-handle shape used
+    elsewhere (judge_local_only, unload_model)."""
+    async def _fn(emit):
+        return await _render_personality_raw(system_prompt, user_prompt)
+
+    request = InferenceRequest(
+        request_class=RequestClass.RESIDENT_PERSONALITY,
+        purpose=purpose,
+        model=MODELS["personality"]["model"],
+        fn=_fn,
+        deadline_seconds=deadline_seconds,
+        label="personality-render",
+    )
+    async for event in coordinator.submit(request):
+        if event.kind == "done":
+            return event.value
+        if event.kind == "denied":
+            raise CoordinatorDenied(event.denial, event.detail)
+    raise CoordinatorDenied(Denial.ERROR, "coordinator produced no terminal event")
 
 
 async def stream_chat(
