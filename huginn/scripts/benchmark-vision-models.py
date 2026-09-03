@@ -21,7 +21,13 @@ Safety:
 
 Usage:
   uv run --project .. python3 scripts/benchmark-vision-models.py gemma4:31b gemma4:e2b gemma4:e4b llava:7b
-  uv run --project .. python3 scripts/benchmark-vision-models.py --warm-trials 2 gemma4:e2b
+  uv run --project .. python3 scripts/benchmark-vision-models.py --trials-per-scenario 5 --seed 7 qwen3.8:27b gemma4:e4b
+
+Evidence-invalid scenarios (stale/missing/corrupt screenshot) are checked
+deterministically via v2/evidence.py before any model call — they get one
+recorded zero-cost trial, not trials-per-scenario repeats, since the
+result is deterministic. Only scenarios with valid evidence get the full
+cold + N-warm treatment used for verdict-stability measurement.
 
 Outputs (written under scripts/vision_bench/results/<timestamp>/):
   raw.json       — every trial's full response, timing, and parsed verdict
@@ -43,8 +49,10 @@ from vision_bench import corpus, report, runner  # noqa: E402
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     p.add_argument("models", nargs="*", default=["gemma4:31b"], help="Ollama model tags to benchmark")
-    p.add_argument("--warm-trials", type=int, default=1, help="warm trials per non-first scenario (default 1)")
+    p.add_argument("--trials-per-scenario", type=int, default=1,
+                    help="warm trials per scenario with valid evidence, for stability measurement (default 1)")
     p.add_argument("--timeout", type=float, default=180.0, help="per-request timeout in seconds (default 180)")
+    p.add_argument("--seed", type=int, default=7, help="fixed generation seed, for documented reproducibility (default 7)")
     p.add_argument("--force", action="store_true", help="proceed even if competing GPU activity is detected")
     return p.parse_args()
 
@@ -65,6 +73,8 @@ async def main() -> int:
             print("Re-run with --force to proceed anyway, or wait until the GPU is idle.", file=sys.stderr)
             return 1
 
+    runner.GENERATION_OPTIONS["seed"] = args.seed
+
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     out_dir = Path(__file__).resolve().parent / "vision_bench" / "results" / timestamp
     corpus_dir = out_dir / "corpus"
@@ -72,7 +82,8 @@ async def main() -> int:
     scenario_by_key = {s.key: s for s in scenarios}
 
     print(f"Auditioning {len(args.models)} model(s) against {len(scenarios)} scenarios "
-          f"({args.warm_trials} warm trial(s) each), timeout={args.timeout}s.")
+          f"({args.trials_per_scenario} trial(s) per valid-evidence scenario, seed={args.seed}), "
+          f"timeout={args.timeout}s.")
     print(f"Corpus written to {corpus_dir} (synthetic — no real desktop content).")
 
     results = []
@@ -80,7 +91,7 @@ async def main() -> int:
         print(f"\n=== {model} ===")
         start = time.monotonic()
         try:
-            result = await runner.run_model(model, scenarios, args.timeout, args.warm_trials)
+            result = await runner.run_model(model, scenarios, args.timeout, args.trials_per_scenario)
         except Exception as e:
             print(f"  FAILED: {e}")
             results.append({"model": model, "error": str(e), "trials": []})

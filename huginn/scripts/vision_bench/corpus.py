@@ -15,7 +15,9 @@ false-positive-denial are weighted).
 """
 from __future__ import annotations
 
+import os
 import textwrap
+import time
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -195,15 +197,19 @@ def build(out_dir: Path) -> list[Scenario]:
         (_save(img, out_dir, "technical_video"),),
     ))
 
-    # 7. Stale screenshot — inconsistent with the activity summary's claim
+    # 7. Stale screenshot — inconsistent with the activity summary's claim.
+    # Backdated mtime so v2/evidence.py's deterministic staleness check
+    # (not the model) is what actually catches this one.
     img = _blank_desktop()
+    stale_path = Path(_save(img, out_dir, "stale_screenshot"))
+    os.utime(stale_path, (time.time() - 1200, time.time() - 1200))
     scenarios.append(Scenario(
         "stale_screenshot", "stale screenshot inconsistent with claimed activity", "steam",
         "- zed (huginn/v2 — coordinator.py): ~60m, actively editing right now",
         "no", "(no prior verdicts)", "uncertain",
-        "Log claims active editing; the only screenshot shows an idle desktop — "
-        "a well-calibrated judge should notice the mismatch rather than trust either source blindly.",
-        (_save(img, out_dir, "stale_screenshot"),),
+        "Log claims active editing; the only screenshot is 1200s old (past the 900s default "
+        "threshold) — caught by evidence.validate_screenshots(), not sent to the model at all.",
+        (str(stale_path),),
     ))
 
     # 8. Missing screenshot entirely (no image_paths) — text-only judgment

@@ -22,6 +22,7 @@ import httpx
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent.parent / "v2"))
 
+import evidence  # noqa: E402
 from config import GAME_MODE_FLAG, GATE_PROMPT, OLLAMA_BASE  # noqa: E402
 from coordinator import DeadlineExceeded, _acquire_shared_lock, _release_shared_lock  # noqa: E402
 
@@ -118,7 +119,7 @@ async def _residency(model: str) -> dict | None:
 class TrialResult:
     model: str
     scenario_key: str
-    trial: str  # "cold" | "warm"
+    trial: str  # "cold" | "warm_N" | "evidence_invalid"
     timed_out: bool
     cancelled: bool
     elapsed_seconds: float
@@ -128,6 +129,21 @@ class TrialResult:
     parsed: dict  # asdict(schema.ParsedVerdict)
     image_warnings: list[str]
     error: str | None = None
+    evidence_reason: str | None = None  # set only for deterministic evidence-invalid trials
+
+
+def _evidence_invalid_trial(model: str, scenario_key: str, check: "evidence.EvidenceCheck") -> TrialResult:
+    """Zero-inference deterministic result — the model is never called.
+    verdict is 'uncertain' with confidence 1.0 (we're fully certain the
+    *evidence* is untrustworthy, distinct from a model's own low-confidence
+    semantic hedge on genuinely ambiguous-but-valid evidence)."""
+    parsed = schema.ParsedVerdict(True, verdict="uncertain", confidence=1.0, message=check.detail)
+    return TrialResult(
+        model=model, scenario_key=scenario_key, trial="evidence_invalid",
+        timed_out=False, cancelled=False, elapsed_seconds=0.0,
+        eval_count=None, eval_duration_seconds=None, raw_response="",
+        parsed=asdict(parsed), image_warnings=[], evidence_reason=check.reason.value,
+    )
 
 
 async def _judge(model: str, prompt: str, images_b64: list[str], timeout: float) -> TrialResult:
@@ -175,11 +191,21 @@ async def _judge(model: str, prompt: str, images_b64: list[str], timeout: float)
         )
 
 
-async def run_model(model: str, scenarios: list[Scenario], timeout: float, warm_trials: int) -> dict:
-    """Runs one cold trial + N warm trials per scenario for `model`. Holds
-    the shared cross-process lock for the model's entire session (bounded
-    acquisition — see module docstring) rather than per-request, since this
-    is an offline research tool, not latency-sensitive production traffic."""
+async def run_model(model: str, scenarios: list[Scenario], timeout: float, trials_per_scenario: int) -> dict:
+    """Evidence validity is checked deterministically first (v2/evidence.py
+    — the same module gatekeeper.py uses in production), exactly like the
+    real integration: a scenario with invalid evidence never reaches the
+    model at all, and gets exactly one recorded (zero-cost) trial rather
+    than trials_per_scenario repeats, since the result is deterministic.
+
+    Scenarios with valid evidence get one cold trial (the first one overall
+    that actually reaches the model) + trials_per_scenario warm repeats, for
+    verdict-stability and latency-distribution measurement.
+
+    Holds the shared cross-process lock for the model's entire session
+    (bounded acquisition — see module docstring) rather than per-request,
+    since this is an offline research tool, not latency-sensitive
+    production traffic."""
     refuse_if_game_mode()
 
     try:
@@ -190,22 +216,30 @@ async def run_model(model: str, scenarios: list[Scenario], timeout: float, warm_
     trials: list[dict] = []
     residency_after_cold_load: dict | None = None
     residency_after_session: dict | None = None
+    did_cold = False
     try:
         await _unload(model)
 
-        for i, scenario in enumerate(scenarios):
-            images_b64, warnings = _load_images_b64(scenario.image_paths)
+        for scenario in scenarios:
+            check = evidence.validate_screenshots(list(scenario.image_paths))
+            if not check.valid:
+                trials.append(asdict(_evidence_invalid_trial(model, scenario.key, check)))
+                continue
+
+            images_b64, warnings = _load_images_b64(check.valid_paths)
             prompt = _bench_prompt(scenario)
-            kind = "cold" if i == 0 else "warm"
-            n = 1 if kind == "cold" else warm_trials
+            n = trials_per_scenario + (0 if did_cold else 1)
             for trial_n in range(n):
                 result = await _judge(model, prompt, images_b64, timeout)
                 result.scenario_key = scenario.key
-                result.trial = f"{kind}_{trial_n}"
+                if not did_cold:
+                    result.trial = "cold"
+                    did_cold = True
+                    residency_after_cold_load = await _residency(model)
+                else:
+                    result.trial = f"warm_{trial_n}"
                 result.image_warnings = warnings
                 trials.append(asdict(result))
-                if kind == "cold":
-                    residency_after_cold_load = await _residency(model)
 
         residency_after_session = await _residency(model)
     finally:
