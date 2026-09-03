@@ -42,10 +42,12 @@ def test_vulnerable_disclosure_is_social_not_reasoning():
     assert d.intent == IntentClass.SOCIAL_DIRECT
 
 
-def test_close_it_is_tool_action():
+def test_close_it_is_ambiguous_no_execution():
+    """No resolvable target ("it") — must not execute unguarded; routes
+    to the existing route, which asks a clarifying question itself."""
     d = classify("Close it.")
-    assert d.intent == IntentClass.TOOL_OR_ACTION
-    assert d.high_confidence is True
+    assert d.intent == IntentClass.AMBIGUOUS
+    assert d.high_confidence is False
 
 
 def test_add_calendar_is_tool_action():
@@ -101,6 +103,63 @@ def test_tool_keyword_wins_even_in_a_social_looking_sentence():
 def test_factual_trigger_wins_over_short_comment_heuristic():
     d = classify("Why does Brave use so much memory?")
     assert d.intent == IntentClass.FACTUAL_OR_REASONING
+
+
+# ── Memory: write vs. recall vs. plain conversation (item 6) ────────────────
+
+def test_i_remember_when_is_social_not_memory_action():
+    """First-person recollection, not an instruction — must not be
+    mistaken for a memory-write request."""
+    d = classify("I remember when we first built this.")
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+
+
+def test_calendars_are_a_strange_way_to_imprison_time_is_social():
+    """Contains "calendar" with no add/schedule verb — must stay social,
+    not be misread as a calendar action."""
+    d = classify("Calendars are a strange way to imprison time.")
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+
+
+def test_what_did_i_ask_to_remember_is_memory_lookup_not_write():
+    d = classify("What did I ask you to remember?")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+    assert d.reason == "memory_recall_question"
+
+
+def test_forget_it_alone_is_ambiguous_no_target():
+    """Never delete memory without a resolved target."""
+    d = classify("Forget it.")
+    assert d.intent == IntentClass.AMBIGUOUS
+    assert d.high_confidence is False
+
+
+def test_forget_that_with_target_is_memory_action():
+    d = classify("Forget that my favorite color is green.")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+    assert d.reason == "memory_delete"
+
+
+def test_tell_muninn_alias_is_memory_action():
+    """Deliberately supported alias."""
+    d = classify("Tell Muninn my favorite color is green.")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+    assert d.reason == "memory_write"
+
+
+def test_hypothetical_command_is_ambiguous_not_executed():
+    """Quoted/hypothetical framing — no execution without actual
+    imperative intent, even though the words "remember" appear inside."""
+    d = classify("What if I told you to remember my favorite color is green?")
+    assert d.intent == IntentClass.AMBIGUOUS
+    assert d.reason == "hypothetical_framing"
+
+
+def test_close_brave_specifically_is_still_tool_action():
+    """A resolved, specific target is fine — only the pronoun-only case
+    is ambiguous."""
+    d = classify("Close Brave.")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
 
 
 # ── Ambiguous default: never personality-only when uncertain ────────────────
