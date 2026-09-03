@@ -1,0 +1,10 @@
+{
+  "mapping": {
+    "A": "qwen3.5:9b",
+    "B": "qwen3.8:27b",
+    "C": "qwen3.5:4b",
+    "D": "gemma4:31b"
+  },
+  "mapping_seed": 1234,
+  "note": "candidate letter -> real Ollama model tag. Read AFTER judging report_blind.md."
+}
