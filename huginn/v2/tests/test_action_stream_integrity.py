@@ -344,3 +344,154 @@ def test_factual_reasoning_still_streams_live_multiple_tokens(tmp_path, monkeypa
     # Streamed live: multiple separate token events, not buffered into one.
     assert writer.types().count("token") == 4
     assert writer.joined_text() == "Monads are a pattern."
+
+
+# ── PART 4: internal protocol structurally separate from prose ─────────────
+# The blind conversation audition's own report shows text like
+# "[tool_call: ...]" and "[confirm_required: ...]" — that's the
+# scripts/conversation_bench benchmark's OWN report serialization
+# (concatenating structured socket events into one readable string for a
+# markdown cell), never something the daemon itself emits as prose. These
+# tests assert that structurally: a confirm_required/tool_call event is
+# always its own distinct JSON event, never embedded as literal text
+# inside a "token" event's content.
+
+def test_confirm_required_is_structural_event_never_embedded_in_token_prose(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+
+    async def spy_stream_chat(messages, model_key, tools=None):
+        yield {"type": "tool_call", "tool": "shell", "args": {"command": "rm -rf /tmp/whatever"}}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+
+    content = "Delete the whatever file."
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, intent.classify(content)))
+
+    assert "confirm_required" in writer.types()
+    for tok in writer.tokens():
+        assert "confirm_required" not in tok
+        assert "[tool_call" not in tok
+    confirm_events = [e for e in writer.events if e["type"] == "confirm_required"]
+    assert confirm_events and confirm_events[0]["tool"] == "shell"
+
+
+def test_tool_call_and_tool_result_are_structural_events_not_prose(tmp_path, monkeypatch):
+    _use_temp_db(tmp_path, monkeypatch)
+
+    async def spy_stream_chat(messages, model_key, tools=None):
+        yield {"type": "tool_call", "tool": "remember", "args": {"key": "x", "value": "y"}}
+        yield {"type": "done"}
+
+    async def fake_execute(record):
+        record.state = ActionState.SUCCEEDED
+        record.result = "remembered: x=y"
+        return record
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+    monkeypatch.setattr(actions, "execute", fake_execute)
+
+    content = "Remember that x is y."
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, intent.classify(content)))
+
+    for tok in writer.tokens():
+        assert "tool_call" not in tok
+        assert "tool_result" not in tok
+    tool_call_events = [e for e in writer.events if e["type"] == "tool_call"]
+    tool_result_events = [e for e in writer.events if e["type"] == "tool_result"]
+    assert tool_call_events and tool_call_events[0]["tool"] == "remember"
+    assert tool_result_events and tool_result_events[0]["tool"] == "remember"
+
+
+# ── Routing-defect fixes ─────────────────────────────────────────────────────
+
+def test_entity_status_question_restricts_tools_to_inspection(tmp_path, monkeypatch):
+    """"What's up with Docker?" must not be able to reach for search_memory
+    as a substitute for checking current state."""
+    _use_temp_db(tmp_path, monkeypatch)
+    captured = {}
+
+    async def spy_stream_chat(messages, model_key, tools=None):
+        captured["tools"] = tools
+        captured["messages"] = messages
+        yield {"type": "token", "content": "Docker looks fine."}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+
+    content = "What's up with Docker?"
+    decision = intent.classify(content)
+    assert decision.reason == "entity_status_question"
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, decision))
+
+    tool_names = {t["function"]["name"] for t in captured["tools"]}
+    assert "search_memory" not in tool_names
+    assert "recall" not in tool_names
+    assert "shell" in tool_names
+    assert any(
+        "current" in m["content"].lower() and "memory" in m["content"].lower()
+        for m in captured["messages"] if m["role"] == "system"
+    )
+
+
+def test_close_docker_scope_expansion_rejected_before_confirm(tmp_path, monkeypatch):
+    """"Close Docker" must not be allowed to silently expand into a
+    stop-and-disable-at-boot proposal — rejected before any confirm prompt
+    is even offered."""
+    _use_temp_db(tmp_path, monkeypatch)
+
+    async def spy_stream_chat(messages, model_key, tools=None):
+        yield {"type": "tool_call", "tool": "shell", "args": {"command": "systemctl stop docker && systemctl disable docker"}}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+
+    content = "Close Docker."
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, intent.classify(content)))
+
+    assert "confirm_required" not in writer.types()
+    assert "more than you asked" in writer.joined_text()
+
+
+def test_scope_matching_proposal_still_reaches_confirm(tmp_path, monkeypatch):
+    """A proposal that does NOT exceed the request still gets the normal
+    confirm flow — the scope guard isn't a blanket block on shell."""
+    _use_temp_db(tmp_path, monkeypatch)
+
+    async def spy_stream_chat(messages, model_key, tools=None):
+        yield {"type": "tool_call", "tool": "shell", "args": {"command": "systemctl stop docker"}}
+        yield {"type": "done"}
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+
+    content = "Close Docker."
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, intent.classify(content)))
+
+    assert "confirm_required" in writer.types()
+
+
+def test_activity_duration_question_gets_deterministic_decline(tmp_path, monkeypatch):
+    """"How long have I been at this?" must never be answered from system
+    uptime — there is no authoritative activity-duration timestamp, so the
+    honest answer is a deterministic decline, never a model call."""
+    _use_temp_db(tmp_path, monkeypatch)
+    calls = {"n": 0}
+
+    async def spy_stream_chat(*a, **kw):
+        calls["n"] += 1
+        return
+        yield  # pragma: no cover
+
+    monkeypatch.setattr(daemon, "stream_chat", spy_stream_chat)
+
+    content = "How long have I been at this?"
+    writer = _RecordingWriter()
+    asyncio.run(daemon._handle_chat_via_existing_route(writer, content, intent.classify(content)))
+
+    assert calls["n"] == 0
+    assert writer.joined_text() == daemon._ACTIVITY_DURATION_DECLINE

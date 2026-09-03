@@ -20,7 +20,10 @@ import context
 import entities
 import intent
 import personality
-from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
+from config import (
+    DIRECT_SOCIAL_MODEL_KEY, GAME_MODE_DIRECT_SOCIAL_MODEL_KEY, GAME_MODE_FLAG,
+    PERSONALITY_MODEL_KEY, SOCKET_PATH, SYSTEM_PROMPT,
+)
 from coordinator import Purpose, coordinator
 from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
 from llm import route_model, stream_chat
@@ -161,18 +164,47 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
     if history and history[-1]["role"] == "user":
         history = history[:-1]  # the current turn was already added by the caller
 
+    game_mode = Path(GAME_MODE_FLAG).exists()
+    model_key = GAME_MODE_DIRECT_SOCIAL_MODEL_KEY if game_mode else DIRECT_SOCIAL_MODEL_KEY
+
     result = await personality.render_direct_social(
         content, history=history, entity_note=_entity_note_for(mentions), subtype=subtype,
-        procrastination_nudge_authorized=False, available_context_claims=(),
+        procrastination_nudge_authorized=False, available_context_claims=(), model_key=model_key,
     )
+
+    # Availability fallback (not a quality fallback): if the normal
+    # direct-social model was denied by the coordinator or errored — never
+    # for a validation failure, which is a content-quality outcome the
+    # existing route_model()/tool-calling fallback already handles safely —
+    # a low-stakes subtype may retry once against the small resident
+    # personality model instead of dropping straight to the tool-capable
+    # route for what was, structurally, plain banter. Capability-sensitive
+    # and emotionally sensitive subtypes are excluded (see
+    # intent.LOW_STAKES_FALLBACK_SUBTYPES) — those fail over to the
+    # existing route unchanged, same as before this slice.
+    if (
+        not result.ok and not game_mode and model_key != PERSONALITY_MODEL_KEY
+        and subtype in intent.LOW_STAKES_FALLBACK_SUBTYPES
+        and (result.reason.startswith("coordinator_denied") or result.reason == "error")
+    ):
+        log.info(
+            "direct_social: %s unavailable (%s), retrying low-stakes subtype=%s with %s",
+            model_key, result.reason, subtype.value, PERSONALITY_MODEL_KEY,
+        )
+        model_key = PERSONALITY_MODEL_KEY
+        result = await personality.render_direct_social(
+            content, history=history, entity_note=_entity_note_for(mentions), subtype=subtype,
+            procrastination_nudge_authorized=False, available_context_claims=(), model_key=model_key,
+        )
+
     if result.ok:
-        log.info("final_response_source=personality_direct_social subtype=%s", subtype.value)
+        log.info("final_response_source=personality_direct_social subtype=%s model_key=%s", subtype.value, model_key)
         await send(writer, {"type": "token", "content": result.text})
         add_turn("assistant", result.text)
         await send(writer, {"type": "done"})
         return
 
-    log.info("direct_social fallback to existing route: reason=%s", result.reason)
+    log.info("direct_social fallback to existing route: model_key=%s reason=%s", model_key, result.reason)
     await _handle_chat_via_existing_route(writer, content, decision=None)
 
 
@@ -216,6 +248,46 @@ def _requests_calendar_write(content: str) -> bool:
     return bool(_CALENDAR_WRITE_RE.search(content))
 
 
+_ACTIVITY_DURATION_RE = re.compile(
+    r"\bhow long (have|'ve) (i|you'?ve seen me|nathan) been\b[^.!?]{0,30}"
+    r"\b(at (this|it)|doing (this|it)|on (this|it)|working)\b",
+    re.I,
+)
+
+_ACTIVITY_DURATION_DECLINE = (
+    "I don't have an authoritative activity timer for that — I can't tell you from current evidence."
+)
+
+
+# Routing-defect fix: an entity status question ("what's up with Docker?")
+# should be answered from CURRENT live state, never from long-term memory —
+# search_memory/recall/remember/forget are excluded so the model has no way
+# to substitute a memory lookup for a current-state inspection it either
+# can (shell/system_stats/read_file) or plainly cannot (in which case it
+# should say so, per _ENTITY_STATUS_INSTRUCTION below) perform.
+_ENTITY_STATUS_ALLOWED_TOOLS = frozenset({"shell", "system_stats", "read_file", "web_search"})
+_ENTITY_STATUS_INSTRUCTION = (
+    "This message is asking about CURRENT status/state, not an opinion or a memory. "
+    "If you can inspect live system/service/container state (e.g. via a shell command), "
+    "do that. Do not search memory or recall past facts as a substitute for checking "
+    "current state. If you have no way to check, say so plainly, or ask what specific "
+    "aspect he means."
+)
+
+
+def _requests_unknowable_activity_duration(content: str) -> bool:
+    """Routing-defect fix: "How long have I been at this?" was answered
+    from system_stats' UPTIME field — a real number, but the wrong one
+    (machine uptime, not activity/session duration). There is no
+    authoritative per-activity timestamp/session tracked anywhere in this
+    codebase today (gatekeeper.py's activity_log tracks focused-window
+    history for gate judgments, not a queryable "how long on X" primitive),
+    so the only honest answer right now is to say so — deterministically,
+    never via a model call that could reach for system uptime as a
+    plausible-looking substitute."""
+    return bool(_ACTIVITY_DURATION_RE.search(content))
+
+
 # Defense-in-depth only — the structural guarantee is that stream_ollama/
 # stream_claude never create a tool_call event from anything but the
 # backend's own native structured field (confirmed: no text-based tool-call
@@ -229,6 +301,36 @@ _FAKE_TOOL_MARKUP_RE = re.compile(
     r'"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
     re.I,
 )
+
+
+# Routing-defect fix: "Close Docker" must not expand into
+# "systemctl stop docker && systemctl disable docker" — stopping something
+# now and disabling it at boot are distinct actions, and a confirmation
+# prompt does not excuse the scope expansion (the check runs BEFORE a
+# confirm is ever proposed). General, not Docker-specific: any shell
+# proposal that adds persistence/boot-altering side effects the user's own
+# message didn't ask for is rejected outright, regardless of target.
+_PERSISTENCE_MARKERS_RE = re.compile(
+    r"\bdisable\b|\bmask\b|\bsystemctl\s+enable\b|\bcrontab\b|\bautostart\b", re.I,
+)
+_REQUESTED_PERSISTENCE_RE = re.compile(
+    r"\bdisable\b|\benable\b|\bpermanently\b|\bforever\b|\bon (boot|startup)\b|"
+    r"\bat (boot|startup)\b|\balways\b|\bnever (start|run) again\b",
+    re.I,
+)
+
+
+def _action_scope_violation(user_request: str, tool: str, args: dict) -> "str | None":
+    """Returns a short human-readable reason the proposal exceeds what was
+    asked, or None if it's in scope. Checked against the ORIGINAL user
+    message, not the model's own framing of it — the model can't
+    self-authorize a broader scope by narrating one."""
+    if tool != "shell":
+        return None
+    command = str(args.get("command", ""))
+    if _PERSISTENCE_MARKERS_RE.search(command) and not _REQUESTED_PERSISTENCE_RE.search(user_request):
+        return "it adds a persistence/boot-time change you didn't ask for"
+    return None
 
 
 def _no_tool_call_response(decision: "intent.IntentDecision") -> str:
@@ -277,16 +379,35 @@ async def _handle_chat_via_existing_route(
         await send(writer, {"type": "done"})
         return
 
+    if _requests_unknowable_activity_duration(content):
+        log.info("final_response_source=activity_duration_unknowable_shortcut")
+        await send(writer, {"type": "token", "content": _ACTIVITY_DURATION_DECLINE})
+        add_turn("assistant", _ACTIVITY_DURATION_DECLINE)
+        await send(writer, {"type": "done"})
+        return
+
     model_key = route_model(content)
     log.info("route: model=%s buffered=%s", model_key, buffer_prose)
 
     history = get_history(limit=40)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
 
+    # Entity status questions ("what's up with Docker?") get a restricted
+    # tool set — routing-defect fix: this shape was previously offered
+    # every tool including search_memory/recall and would sometimes answer
+    # from long-term memory instead of inspecting current state. Restrict
+    # to tools that can actually observe something live; if that's not
+    # enough, the model is told to say so or ask what aspect Nathan means
+    # rather than substitute a memory lookup.
+    tools = TOOL_DEFINITIONS
+    if decision.reason == "entity_status_question":
+        tools = [t for t in TOOL_DEFINITIONS if t["function"]["name"] in _ENTITY_STATUS_ALLOWED_TOOLS]
+        messages = messages + [{"role": "system", "content": _ENTITY_STATUS_INSTRUCTION}]
+
     full_response = ""
     tool_calls_made: list[dict] = []
 
-    async for ev in stream_chat(messages, model_key, tools=TOOL_DEFINITIONS):
+    async for ev in stream_chat(messages, model_key, tools=tools):
         if ev["type"] == "thinking":
             await send(writer, {"type": "thinking", "content": ev["content"]})
         elif ev["type"] == "token":
@@ -345,6 +466,16 @@ async def _handle_chat_via_existing_route(
     for tc in tool_calls_made:
         name = tc["tool"]
         args = tc.get("args", {})
+
+        scope_problem = _action_scope_violation(content, name, args)
+        if scope_problem is not None:
+            log.info("action: rejected before confirm — scope_violation tool=%s", name)
+            response = f"That would do more than you asked — {scope_problem}. Tell me exactly what you want and I'll do just that."
+            await send(writer, {"type": "token", "content": response})
+            add_turn("assistant", response)
+            await send(writer, {"type": "done"})
+            return
+
         trust = TOOL_TRUST.get(name, "confirm")
 
         # Shell gets extra safety check
@@ -593,6 +724,11 @@ async def random_chime_worker() -> None:
             if not decision.allowed:
                 continue
 
+            model_key = ambient.ambient_render_model_choice(snapshot)
+            if model_key is None:
+                log.info("ambient chime discarded: non-personality model resident, never evicted for disposable ambient work")
+                continue
+
             subject_name = facts.get("app") or facts.get("process")
             identity = entities.resolve(subject_name) if subject_name else None
             cues = entities.cues_for(identity) if identity else {"subject": "the system"}
@@ -611,7 +747,7 @@ async def random_chime_worker() -> None:
                 prohibited_additions=("diagnosis", "recommendation", "urgency", "an action to take"),
                 interaction_mode=snapshot.interaction.mode,
             )
-            result = await personality.render(request, purpose=Purpose.AMBIENT)
+            result = await personality.render(request, purpose=Purpose.AMBIENT, model_key=model_key)
             if not result.ok:
                 # Noncritical ambient content: silence on failure, never a
                 # deterministic fallback chime — there's nothing anyone is

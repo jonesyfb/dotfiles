@@ -185,3 +185,69 @@ def test_ambiguous_never_reports_high_confidence():
     d = classify("hmm")
     if d.intent == IntentClass.AMBIGUOUS:
         assert d.high_confidence is False
+
+
+# ── Routing-defect fixes ─────────────────────────────────────────────────────
+# Reproduced from scripts/direct_chat_bench/results/20260903T165020Z/routing_defects.md
+
+def test_declarative_have_open_is_not_an_action():
+    d = classify("I've got that browser open.")
+    assert d.intent != IntentClass.TOOL_OR_ACTION
+
+
+def test_declarative_have_x_open_named_entity_is_not_an_action():
+    d = classify("I've got Brave open.")
+    assert d.intent != IntentClass.TOOL_OR_ACTION
+
+
+def test_imperative_open_is_still_an_action():
+    d = classify("Open Brave.")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+
+
+def test_imperative_request_phrased_as_question_still_wins():
+    """Existing guarantee must survive the declarative/imperative fix."""
+    d = classify("Hey, can you close Brave for me?")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+
+
+def test_yes_no_state_question_about_entity_is_factual_status():
+    d = classify("Is Brave open?")
+    assert d.intent == IntentClass.FACTUAL_OR_REASONING
+    assert d.reason == "entity_status_question"
+
+
+def test_wh_question_about_entity_state_is_not_forced_into_action():
+    d = classify("What did Brave open?")
+    assert d.intent != IntentClass.TOOL_OR_ACTION
+
+
+def test_tag_question_is_social_direct_not_ambiguous():
+    d = classify("Night owl, huh?")
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+    assert d.high_confidence is True
+
+
+def test_bare_entity_mention_alone_is_ambiguous():
+    d = classify("Docker.")
+    assert d.intent == IntentClass.AMBIGUOUS
+    assert d.reason == "bare_entity_reference"
+
+
+def test_bare_entity_mention_with_content_is_not_forced_ambiguous():
+    d = classify("Docker's being a whale again.")
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+
+
+def test_close_docker_with_content_beyond_name_still_an_action():
+    d = classify("Close Docker.")
+    assert d.intent == IntentClass.TOOL_OR_ACTION
+
+
+def test_elliptical_you_ever_banter_is_social_direct():
+    """Regression: live acceptance run found "You ever get bored watching
+    me work?" (dropped "do") fell to AMBIGUOUS and the generic
+    no-tool-call fallback."""
+    d = classify("You ever get bored watching me work?")
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+    assert d.reason == "banter_about_huginn"

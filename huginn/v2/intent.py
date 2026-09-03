@@ -84,6 +84,21 @@ SOCIAL_SUBTYPE_LIMITS: dict[SocialSubtype, tuple[int, int]] = {
     SocialSubtype.ENTITY_CORRECTION: (2, 200),
 }
 
+# Subtypes safe to hand to the smaller qwen3.5:4b model as a fallback when
+# the normal direct-social model (qwen3.5:9b) is unavailable or times out —
+# see daemon.handle_direct_social. Deliberately excludes CAPABILITY_QUESTION
+# (an accurate capability answer matters — better to fail over to the
+# existing tool-capable route than risk a worse one), VULNERABLE_DISCLOSURE
+# (emotionally sensitive, not worth risking a lower-quality response for),
+# and ENTITY_CORRECTION (the state change already happened deterministically
+# regardless of which model narrates it, but getting the acknowledgment
+# wrong here is the one place model quality visibly matters for
+# correctness-adjacent behavior).
+LOW_STAKES_FALLBACK_SUBTYPES = frozenset({
+    SocialSubtype.GREETING, SocialSubtype.CASUAL_BANTER, SocialSubtype.ENTITY_OPINION,
+    SocialSubtype.LEISURE_STATEMENT, SocialSubtype.DISMISSAL, SocialSubtype.IDENTITY_QUESTION,
+})
+
 
 @dataclass(frozen=True)
 class IntentDecision:
@@ -145,6 +160,31 @@ _RESTORE_ENTITY_RE = re.compile(
 # there's nothing to distinguish it from ordinary short social comment.
 _STATUS_QUESTION_RE = re.compile(r"\bwhat'?s up with\b|\bhow'?s\b.{0,30}\bdoing\??\s*$", re.I)
 
+# A yes/no question about whether something is in a particular state
+# ("Is Brave open?", "Is Docker running?") is a status/inspection request
+# like _STATUS_QUESTION_RE above — same promotion rule (only when the
+# subject resolves through the entity lens).
+_YES_NO_STATE_QUESTION_RE = re.compile(
+    r"^\s*(is|are|was|were)\b.{0,40}\b(open|closed|running|installed|active|up|down|stopped)\??\s*$",
+    re.I,
+)
+
+# "The mere presence of an action verb is not sufficient imperative
+# evidence" (routing-defect fix): a WH-question about state ("What did
+# Brave open?", "Where is it running?") or a declarative statement of
+# current state ("I've got that browser open", "Is Docker running?" —
+# also caught by _YES_NO_STATE_QUESTION_RE above, harmless overlap) uses
+# the same words as an imperative command but isn't one. Neutralizes
+# _TOOL_ACTION_RE's bare keyword match for these shapes rather than
+# trying to make the imperative check itself airtight via anchoring
+# (which would also have to special-case "Hey, can you close Brave for
+# me?" — a real imperative that doesn't start with the verb).
+_NON_IMPERATIVE_STATE_RE = re.compile(
+    r"^\s*(what|who|where|when|which|why)\b|"
+    r"\b(?:i'?ve|i have|i had|is|are|was|were|did)\b[^.!?]{0,30}\b(open|closed|running|installed|updated|stopped)\b",
+    re.I,
+)
+
 # ── close/open with no resolvable target ────────────────────────────────────
 _PRONOUN_ONLY_TARGET_RE = re.compile(r"\b(close|open|kill|restart)\s+(it|this|that)\b\.?\s*$", re.I)
 
@@ -174,10 +214,33 @@ _FACTUAL_RE = re.compile(
 
 _GREETING_RE = re.compile(r"^\s*(hi|hey|hello|yo|sup|morning|good morning|evening|good evening)\b[.!]?\s*$", re.I)
 _OPINION_RE = re.compile(r"\b(what do you think|thoughts on|do you like|how do you feel about)\b", re.I)
-_BANTER_ABOUT_HUGINN_RE = re.compile(r"\b(are you|you'?re being|you seem|do you ever)\b.*\b(useful|real|annoying|okay|alright|sentient|bored)\b", re.I)
+# "you ever" (elliptical, dropped "do") is as common as "do you ever" in
+# casual speech — routing-defect-adjacent fix, same colloquial-ellipsis
+# theme as _TAG_QUESTION_RE below: "You ever get bored watching me work?"
+# previously fell through to AMBIGUOUS and the generic no-tool-call fallback.
+_BANTER_ABOUT_HUGINN_RE = re.compile(r"\b(are you|you'?re being|you seem|(?:do )?you ever)\b.*\b(useful|real|annoying|okay|alright|sentient|bored)\b", re.I)
 _FEELING_STATEMENT_RE = re.compile(r"^\s*i('m| am|'ve| have)\b", re.I)
 
+# General shape, not an enumerated phrase table: a short utterance ending
+# in a conversational tag ("...huh?", "...right?", "...eh?", "...isn't
+# it?") reads as banter, not a real question requiring a fact lookup or
+# action.
+_TAG_QUESTION_RE = re.compile(r",?\s*(huh|right|eh|isn'?t it|don'?t you think)\??\s*$", re.I)
+
 _MAX_SOCIAL_WORDS = 25
+
+
+def _is_bare_entity_mention(text: str, mentions: "list[str]") -> bool:
+    """True when, after stripping trailing punctuation, the ENTIRE message
+    is just the mentioned entity name(s) and nothing else — "Docker.",
+    "Docker?", "Brave" — as opposed to "Close Docker." or "Docker's being
+    a whale again.", which have real content beyond the bare name."""
+    if not mentions:
+        return False
+    stripped = re.sub(r"[.!?,;:]+$", "", text.strip())
+    mention_words = {m.lower() for m in mentions}
+    remaining = [w for w in stripped.split() if w.lower() not in mention_words]
+    return len(remaining) == 0
 
 
 def classify(content: str) -> IntentDecision:
@@ -224,7 +287,9 @@ def classify(content: str) -> IntentDecision:
     if _PRONOUN_ONLY_TARGET_RE.search(text):
         return IntentDecision(IntentClass.AMBIGUOUS, False, "unresolved_target")
 
-    if _TOOL_ACTION_RE.search(text):
+    non_imperative_state = _NON_IMPERATIVE_STATE_RE.search(text)
+
+    if _TOOL_ACTION_RE.search(text) and not non_imperative_state:
         return IntentDecision(IntentClass.TOOL_OR_ACTION, True, "tool_action_keyword")
 
     # "What's up with Docker?" (status/inspection) vs. "What do you think
@@ -235,12 +300,25 @@ def classify(content: str) -> IntentDecision:
     if _STATUS_QUESTION_RE.search(text) and entities.extract_mentions(text):
         return IntentDecision(IntentClass.FACTUAL_OR_REASONING, True, "entity_status_question")
 
+    if _YES_NO_STATE_QUESTION_RE.search(text) and entities.extract_mentions(text):
+        return IntentDecision(IntentClass.FACTUAL_OR_REASONING, True, "entity_status_question")
+
     if _FACTUAL_RE.search(text):
         return IntentDecision(IntentClass.FACTUAL_OR_REASONING, True, "factual_trigger")
 
     word_count = len(text.split())
     if word_count > _MAX_SOCIAL_WORDS:
         return IntentDecision(IntentClass.AMBIGUOUS, False, "too_long_for_high_confidence_social")
+
+    # A bare entity mention with no other content ("Docker.") is not
+    # confidently an opinion request — routing-defect fix: it should not
+    # "automatically become an entity opinion." intent.classify() has no
+    # conversation-history signal to resolve it more precisely, so the
+    # honest, safe outcome is ambiguous (existing route asks for
+    # clarification) rather than a guessed-at high-confidence answer.
+    mentions = entities.extract_mentions(text)
+    if _is_bare_entity_mention(text, mentions):
+        return IntentDecision(IntentClass.AMBIGUOUS, False, "bare_entity_reference")
 
     if _GREETING_RE.search(text):
         return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "greeting")
@@ -250,6 +328,12 @@ def classify(content: str) -> IntentDecision:
         return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "banter_about_huginn")
     if _FEELING_STATEMENT_RE.search(text) and "?" not in text:
         return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "feeling_statement")
+    # Elliptical social tag question ("Night owl, huh?", "Busy day, right?")
+    # — a general shape, not a phrase lookup table: routing-defect fix,
+    # this used to fall through to AMBIGUOUS and get the generic
+    # no-tool-call fallback message for what is plainly banter.
+    if _TAG_QUESTION_RE.search(text) and word_count <= _MAX_SOCIAL_WORDS:
+        return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "tag_question")
     # A short, plain statement with no question mark and no trigger words
     # above ("The Lion is getting fat again.") reads as banter/comment, not
     # a request for anything. Safe even if this over-fires occasionally:
