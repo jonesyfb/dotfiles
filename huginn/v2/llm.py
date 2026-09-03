@@ -1,11 +1,14 @@
 """
 Model router + streaming for Huginn v2.
 Auto-routes to fast/full/cloud based on query complexity.
-Ollama exclusive lock prevents VRAM collisions with garage-watch.
+
+GPU-touching calls (stream_ollama, _judge_ollama, _unload_model_raw) no
+longer take a lock themselves — they're raw primitives now. The
+coordinator (coordinator.py) owns scheduling and the cross-process flock;
+see stream_chat()/judge_local_only()/unload_model() below, which are the
+functions callers should actually use.
 """
 import asyncio
-import contextlib
-import fcntl
 import json
 import re
 from pathlib import Path
@@ -13,22 +16,18 @@ from typing import AsyncIterator
 
 import httpx
 
-from config import (
-    GAME_MODE_FLAG, GATE_JUDGE_TIMEOUT_SECONDS, MODELS, OLLAMA_BASE,
-    SYSTEM_PROMPT, _OLLAMA_LOCK_PATH,
-)
+from config import GAME_MODE_FLAG, GATE_JUDGE_TIMEOUT_SECONDS, MODELS, OLLAMA_BASE, SYSTEM_PROMPT
+from coordinator import Denial, InferenceRequest, Purpose, RequestClass, coordinator
 
-# ── Ollama exclusive lock (shared with garage-watch) ──────────────────────────
 
-@contextlib.asynccontextmanager
-async def ollama_lock():
-    f = open(_OLLAMA_LOCK_PATH, "w")
-    await asyncio.to_thread(fcntl.flock, f.fileno(), fcntl.LOCK_EX)
-    try:
-        yield
-    finally:
-        fcntl.flock(f.fileno(), fcntl.LOCK_UN)
-        f.close()
+class CoordinatorDenied(Exception):
+    """Raised by the coordinator-routed helpers below when a request was
+    denied (game mode, deadline, queue full, preempted) rather than run."""
+
+    def __init__(self, denial: Denial, detail: str):
+        super().__init__(f"{denial.value}: {detail}")
+        self.denial = denial
+        self.detail = detail
 
 
 def is_game_mode() -> bool:
@@ -83,45 +82,43 @@ async def stream_ollama(
     if tools:
         payload["tools"] = tools
 
-    async with ollama_lock():
-        async with httpx.AsyncClient(timeout=180) as client:
-            async with client.stream(
-                "POST", f"{OLLAMA_BASE}/api/chat", json=payload
-            ) as resp:
-                resp.raise_for_status()
-                async for line in resp.aiter_lines():
-                    if not line.strip():
-                        continue
-                    try:
-                        chunk = json.loads(line)
-                    except json.JSONDecodeError:
-                        continue
+    async with httpx.AsyncClient(timeout=180) as client:
+        async with client.stream(
+            "POST", f"{OLLAMA_BASE}/api/chat", json=payload
+        ) as resp:
+            resp.raise_for_status()
+            async for line in resp.aiter_lines():
+                if not line.strip():
+                    continue
+                try:
+                    chunk = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
 
-                    msg = chunk.get("message", {})
-                    role = msg.get("role", "")
+                msg = chunk.get("message", {})
 
-                    # thinking tokens
-                    thinking = msg.get("thinking", "")
-                    if thinking:
-                        yield {"type": "thinking", "content": thinking}
+                # thinking tokens
+                thinking = msg.get("thinking", "")
+                if thinking:
+                    yield {"type": "thinking", "content": thinking}
 
-                    # regular content
-                    content = msg.get("content", "")
-                    if content:
-                        yield {"type": "token", "content": content}
+                # regular content
+                content = msg.get("content", "")
+                if content:
+                    yield {"type": "token", "content": content}
 
-                    # tool calls
-                    for tc in msg.get("tool_calls", []):
-                        fn = tc.get("function", {})
-                        yield {
-                            "type": "tool_call",
-                            "tool": fn.get("name", ""),
-                            "args": fn.get("arguments", {}),
-                        }
+                # tool calls
+                for tc in msg.get("tool_calls", []):
+                    fn = tc.get("function", {})
+                    yield {
+                        "type": "tool_call",
+                        "tool": fn.get("name", ""),
+                        "args": fn.get("arguments", {}),
+                    }
 
-                    if chunk.get("done"):
-                        yield {"type": "done"}
-                        return
+                if chunk.get("done"):
+                    yield {"type": "done"}
+                    return
 
 
 async def stream_claude(
@@ -201,7 +198,10 @@ async def judge_once(
 ) -> str:
     """One-shot, non-streaming completion with optional image attachments.
     Returns the raw text response. Tries `prefer` first, falls back to the
-    local vision model on any failure."""
+    local vision model on any failure. Does NOT go through the coordinator —
+    nothing currently calls this (judge_local_only is what gatekeeper uses);
+    kept only so an eventual non-local-only judge use case doesn't need to
+    reinvent the cloud/local fallback."""
     image_paths = image_paths or []
     try:
         if prefer == "cloud":
@@ -215,11 +215,31 @@ async def judge_once(
 
 async def judge_local_only(prompt: str, image_paths: list[str] | None = None) -> str:
     """Local-only judgment for data that must never leave the machine (e.g.
-    gatekeeper screenshots and activity history). Unlike judge_once, there is
-    no `prefer` argument and no code path to _judge_claude anywhere in this
-    function — the cloud model is structurally unreachable from here, not
-    just unselected by a default."""
-    return await _judge_ollama(prompt, image_paths or [])
+    gatekeeper screenshots and activity history), scheduled through the
+    coordinator (LOCAL_VISION_GATEKEEPER / GATE_DECISION). No `prefer`
+    argument and no code path to _judge_claude anywhere in this function —
+    the cloud model is structurally unreachable from here, not just
+    unselected by a default. Raises on denial (deadline/game-mode/queue-full/
+    preempted) so callers keep their existing except-and-fail-closed shape."""
+    from config import GATE_QUEUE_DEADLINE_SECONDS
+
+    async def _fn(emit):
+        return await _judge_ollama(prompt, image_paths or [])
+
+    request = InferenceRequest(
+        request_class=RequestClass.LOCAL_VISION_GATEKEEPER,
+        purpose=Purpose.GATE_DECISION,
+        model=MODELS["vision"]["model"],
+        fn=_fn,
+        deadline_seconds=GATE_QUEUE_DEADLINE_SECONDS,
+        label="gatekeeper-judge",
+    )
+    async for event in coordinator.submit(request):
+        if event.kind == "done":
+            return event.value
+        if event.kind == "denied":
+            raise CoordinatorDenied(event.denial, event.detail)
+    raise CoordinatorDenied(Denial.ERROR, "coordinator produced no terminal event")
 
 
 async def _judge_claude(prompt: str, image_paths: list[str]) -> str:
@@ -265,19 +285,20 @@ async def _judge_ollama(prompt: str, image_paths: list[str]) -> str:
         "messages": [message],
         "stream": False,
     }
-    async with ollama_lock():
-        async with httpx.AsyncClient(timeout=GATE_JUDGE_TIMEOUT_SECONDS) as client:
-            r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
-            r.raise_for_status()
-            return r.json().get("message", {}).get("content", "")
+    # No lock here — the coordinator holds the shared flock around this call
+    # (see judge_local_only above and coordinator._run_item). This function
+    # is a raw primitive now, not a public entry point.
+    async with httpx.AsyncClient(timeout=GATE_JUDGE_TIMEOUT_SECONDS) as client:
+        r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+        r.raise_for_status()
+        return r.json().get("message", {}).get("content", "")
 
 
-async def unload_model(model: str) -> None:
-    """Best-effort immediate unload (keep_alive=0). Fire-and-forget — a
-    failure here just means the model stays resident a bit longer, which is
-    the same as if this were never called. Does not take ollama_lock(): it's
-    used from gatekeeper's game-mode short-circuit specifically so it can't
-    itself get stuck behind a slow judgment holding the lock."""
+async def _unload_model_raw(model: str) -> None:
+    """Best-effort immediate unload (keep_alive=0). Raw primitive — no lock,
+    no coordinator routing. Use unload_model() below instead; this exists
+    only so the coordinator's own execution slot can call it while already
+    holding the flock, without recursively going through submit()."""
     try:
         async with httpx.AsyncClient(timeout=5) as client:
             await client.post(f"{OLLAMA_BASE}/api/generate", json={"model": model, "keep_alive": 0})
@@ -285,15 +306,73 @@ async def unload_model(model: str) -> None:
         pass
 
 
+async def unload_model(model: str) -> None:
+    """Coordinator-routed unload. Re-checks actual residency immediately
+    before unloading (state may have changed while queued) — see
+    coordinator._run_item, which re-runs admission checks right before
+    execution, and the closure below, which re-probes /api/ps at that exact
+    moment rather than trusting whatever the caller observed earlier."""
+    async def _fn(emit):
+        import context
+        loaded = await context.probe_ollama_loaded()
+        if loaded is None or any(m.get("model") == model for m in loaded):
+            # Unknown state or confirmed still resident — either way, an
+            # unload attempt is harmless (keep_alive=0 on an already-unloaded
+            # model is a no-op), so proceed rather than risk skipping a real
+            # unload because the probe itself failed.
+            await _unload_model_raw(model)
+        return None
+
+    request = InferenceRequest(
+        request_class=RequestClass.MODEL_LOAD_UNLOAD,
+        purpose=Purpose.MAINTENANCE,
+        model=model,
+        fn=_fn,
+        deadline_seconds=10.0,
+        label="unload-if-resident",
+    )
+    async for event in coordinator.submit(request):
+        if event.kind in ("done", "denied"):
+            return
+
+
 async def stream_chat(
     messages: list[dict],
     model_key: str,
     tools: list[dict] | None = None,
+    purpose: Purpose = Purpose.DIRECT,
 ) -> AsyncIterator[dict]:
+    """purpose defaults to DIRECT (a human is waiting) — callers doing
+    background work (random_chime_worker) must pass Purpose.AMBIENT
+    explicitly. Cloud backend bypasses the coordinator entirely: it's a
+    separate resource with no local GPU contention to schedule around."""
     cfg = MODELS[model_key]
-    if cfg["backend"] == "ollama":
-        async for ev in stream_ollama(cfg["model"], messages, tools):
-            yield ev
-    else:
+    if cfg["backend"] != "ollama":
         async for ev in stream_claude(messages, tools):
             yield ev
+        return
+
+    request_class = (
+        RequestClass.RESIDENT_PERSONALITY if model_key == "personality"
+        else RequestClass.ORDINARY_LOCAL_REASONING
+    )
+
+    async def _fn(emit):
+        async for ev in stream_ollama(cfg["model"], messages, tools):
+            await emit(ev)
+        return None
+
+    request = InferenceRequest(
+        request_class=request_class,
+        purpose=purpose,
+        model=cfg["model"],
+        fn=_fn,
+        label="chat",
+    )
+    async for event in coordinator.submit(request):
+        if event.kind == "chunk":
+            yield event.value
+        elif event.kind == "denied":
+            yield {"type": "token", "content": f"[inference unavailable: {event.detail}]"}
+            yield {"type": "done"}
+            return

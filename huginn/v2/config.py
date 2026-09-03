@@ -18,12 +18,39 @@ GATE_TTL_SECONDS            = 600  # cache a verdict this long before re-judging
 YOUTUBE_GRACE_SECONDS       = 90   # continuous YouTube focus before it counts as recreational
 STEAM_BYPASS_GRACE_SECONDS  = 60   # continuous Steam/game focus before checking for a bypass
 
-# Named — was a bare `120` in llm.py's httpx client. gemma4:31b runs
-# partially on CPU on this box (doesn't fully fit in VRAM alone), so a real
-# gate judgment with images can take significantly longer than a cold-load
-# benchmark would suggest. A timeout here always fails closed (denies) and
-# never falls back to cloud — see llm.judge_local_only.
+# httpx-level backstop inside llm._judge_ollama. The coordinator's own
+# GATE_QUEUE_DEADLINE_SECONDS (below) is the real end-to-end bound now
+# (queue wait + run); this just ensures a single Ollama call can never hang
+# past a sane ceiling even if the coordinator's own accounting has a bug.
+# Always fails closed and never falls back to cloud — see llm.judge_local_only.
 GATE_JUDGE_TIMEOUT_SECONDS = 120
+
+# ── Local-inference coordinator ──────────────────────────────────────────────
+# Bounded, cancellation-aware acquisition of the cross-process flock at
+# _OLLAMA_LOCK_PATH (shared with Garage Watch) — polls LOCK_EX|LOCK_NB
+# instead of blocking indefinitely, so a deadline is honorable even while
+# Garage Watch holds the real OS lock.
+LOCK_POLL_INITIAL_SECONDS = 0.05
+LOCK_POLL_MAX_SECONDS     = 1.0
+
+# Only GATE_DECISION ages toward foreground priority while queued (so it
+# can't be starved forever by continuous chat) — every this-many-seconds
+# waited, its effective priority improves by one tier, floored at DIRECT's
+# tier. DIRECT/CRITICAL are already top tier; AMBIENT/MAINTENANCE
+# deliberately never age — see *_MAX_QUEUE_SECONDS below, they expire
+# instead of escalating into interrupting the user long after the fact.
+GATE_DECISION_AGING_INTERVAL_SECONDS = 15
+
+# Ambient/maintenance work is disposable: if not served within this window,
+# drop it rather than let it age into relevance it no longer has.
+AMBIENT_MAX_QUEUE_SECONDS     = 60
+MAINTENANCE_MAX_QUEUE_SECONDS = 300
+
+# Total end-to-end deadline for a gate decision: queue wait + run, combined.
+GATE_QUEUE_DEADLINE_SECONDS = 120
+
+COORDINATOR_MAX_QUEUE_DEPTH = 20    # bounded queueing
+GAME_MODE_POLL_SECONDS      = 1.0   # how often a running non-personality item is re-checked against game mode
 
 # ── Ambient interruption policy ──────────────────────────────────────────────
 AMBIENT_COOLDOWN_SECONDS = 1800     # min gap between ambient events of the same kind

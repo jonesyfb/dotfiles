@@ -9,14 +9,14 @@ import re
 import subprocess
 import time
 
-import context
 from config import (
     ACTIVITY_POLL, BROWSER_APPS, EDITOR_APPS, GATE_PROMPT, GATE_TTL_SECONDS,
     MODELS, SCREENS_DIR, SCREENSHOT_INTERVAL, SCREENSHOT_KEEP,
     STEAM_BYPASS_GRACE_SECONDS, YOUTUBE_GRACE_SECONDS,
 )
 from context import focused_window as _focused_window, in_discord_call
-from llm import judge_local_only, unload_model
+from coordinator import Denial
+from llm import CoordinatorDenied, judge_local_only, unload_model
 from memory import (
     activity_since, last_verdict, log_activity, prune_activity,
     recent_screenshots, recent_verdicts, save_screenshot, save_verdict,
@@ -170,23 +170,6 @@ async def check_gate(target: str) -> dict:
     if cached:
         return {"approved": bool(cached["approved"]), "message": cached["message"], "cached": True}
 
-    # Resource policy, not a judgment: gemma4:31b doesn't fit this box's
-    # VRAM alongside anything else (~17GB VRAM + ~8GB CPU spillover for a
-    # 25GB runtime footprint) and is slow once split. Never trigger a load
-    # of it during game mode. Deliberately NOT cached via save_verdict — a
-    # cached denial here would outlive game mode ending, wrongly blocking a
-    # real request made moments after the user stops playing.
-    if context.collect_interaction().mode == "game":
-        vision_model = MODELS["vision"]["model"]
-        if any(m.get("model") == vision_model for m in (await context.probe_ollama_loaded() or [])):
-            await unload_model(vision_model)
-        return {
-            "approved": False,
-            "message": "Not while you're playing. Ask again after.",
-            "cached": False,
-            "reason": "game_mode",
-        }
-
     prompt = GATE_PROMPT.format(
         target=target,
         activity_summary=activity_summary(),
@@ -198,6 +181,23 @@ async def check_gate(target: str) -> dict:
     try:
         raw = await judge_local_only(prompt, images)
         verdict = _parse_verdict(raw)
+    except CoordinatorDenied as e:
+        if e.denial == Denial.GAME_MODE:
+            # Resource policy, not a judgment: gemma4:31b doesn't fit this
+            # box's VRAM alongside anything else and is slow once split.
+            # The coordinator already refused to touch Ollama at all — this
+            # just proactively unloads it if it happens to already be
+            # resident, via the coordinator (never out-of-band). Not cached:
+            # a cached denial here would outlive game mode ending, wrongly
+            # blocking a real request made moments after the user stops.
+            await unload_model(MODELS["vision"]["model"])
+            return {
+                "approved": False,
+                "message": "Not while you're playing. Ask again after.",
+                "cached": False,
+                "reason": "game_mode",
+            }
+        verdict = {"approved": False, "message": f"Judgment failed ({e.denial.value}). Denying by default."}
     except Exception as e:
         verdict = {"approved": False, "message": f"Judgment failed ({e}). Denying by default."}
 

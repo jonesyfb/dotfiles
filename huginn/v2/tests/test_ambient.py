@@ -23,7 +23,7 @@ def _snapshot(interaction=None, attention=None, models=None):
     tools = context.collect_tools(set())
     desktop = context.DesktopState(focused_window=None, in_discord_call=False)
     resources = context.collect_model_resources(models, [], interaction)
-    return context.RuntimeContext(0.0, interaction, attention, task, models, tools, desktop, resources)
+    return context.RuntimeContext(0.0, interaction, attention, task, models, tools, desktop, resources, {})
 
 
 def _use_temp_db(tmp_path, monkeypatch):
@@ -237,6 +237,7 @@ def test_entertainment_alone_is_not_treated_as_procrastination(tmp_path, monkeyp
             in_discord_call=False,
         ),
         snapshot.model_resources,
+        snapshot.coordinator,
     )
     decision = ambient.decide(AmbientOpportunity(kind="periodic_observation"), snapshot)
     assert decision.allowed is True

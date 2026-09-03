@@ -461,19 +461,39 @@ def _queue_task(label: str, command: str) -> str:
     return f"queued: {label} (id {task_id})"
 
 
-async def _get_embedding(text: str) -> list[float]:
-    async with httpx.AsyncClient(timeout=30) as c:
-        r = await c.post(
-            "http://localhost:11434/api/embed",
-            json={"model": "nomic-embed-text", "input": text},
-        )
-        return r.json()["embeddings"][0]
+async def _get_embedding(text: str, purpose=None) -> list[float]:
+    from coordinator import InferenceRequest, Purpose, RequestClass, coordinator
+
+    purpose = purpose or Purpose.DIRECT
+
+    async def _fn(emit):
+        async with httpx.AsyncClient(timeout=30) as c:
+            r = await c.post(
+                "http://localhost:11434/api/embed",
+                json={"model": "nomic-embed-text", "input": text},
+            )
+            return r.json()["embeddings"][0]
+
+    request = InferenceRequest(
+        request_class=RequestClass.MAINTENANCE_BACKGROUND,
+        purpose=purpose,
+        model="nomic-embed-text",
+        fn=_fn,
+        label="embed",
+    )
+    async for event in coordinator.submit(request):
+        if event.kind == "done":
+            return event.value
+        if event.kind == "denied":
+            raise RuntimeError(f"embedding unavailable: {event.detail}")
+    raise RuntimeError("embedding coordinator produced no terminal event")
 
 
 async def _embed_and_store(text: str, source: str) -> None:
+    from coordinator import Purpose
     try:
         from memory import store_vec
-        vec = await _get_embedding(text)
+        vec = await _get_embedding(text, purpose=Purpose.MAINTENANCE)
         store_vec(text, source, vec)
     except Exception:
         pass

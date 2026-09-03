@@ -305,7 +305,7 @@ def test_debug_dict_redacts_window_title(tmp_path, monkeypatch):
     models = context.collect_models(set())
     tools = context.collect_tools(set())
     resources = context.collect_model_resources(models, [], interaction)
-    snapshot = context.RuntimeContext(0.0, interaction, attention, task, models, tools, desktop, resources)
+    snapshot = context.RuntimeContext(0.0, interaction, attention, task, models, tools, desktop, resources, {})
 
     payload = context.to_debug_dict(snapshot)
     dumped = json.dumps(payload)

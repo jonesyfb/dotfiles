@@ -17,6 +17,7 @@ from pathlib import Path
 import ambient
 import context
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
+from coordinator import Purpose, coordinator
 from gatekeeper import activity_summary, activity_tracker_worker, check_gate, screenshot_worker
 from llm import route_model, stream_chat
 from memory import (
@@ -256,7 +257,7 @@ async def random_chime_worker() -> None:
                 {"role": "user", "content": prompt},
             ]
             response = ""
-            async for ev in stream_chat(messages, "fast"):
+            async for ev in stream_chat(messages, "fast", purpose=Purpose.AMBIENT):
                 if ev["type"] == "token":
                     response += ev["content"]
                 elif ev["type"] == "done":
@@ -436,6 +437,9 @@ async def main() -> None:
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
         loop.add_signal_handler(sig, lambda: asyncio.ensure_future(_shutdown(server)))
+
+    coordinator.set_game_mode_check(lambda: context.collect_interaction().mode == "game")
+    coordinator.start()
 
     asyncio.ensure_future(task_worker())
     asyncio.ensure_future(random_chime_worker())

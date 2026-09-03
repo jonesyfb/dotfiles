@@ -50,8 +50,9 @@ def test_judge_local_only_does_not_fall_back_to_cloud_on_local_failure(monkeypat
     try:
         asyncio.run(llm.judge_local_only("prompt", []))
         raised = False
-    except RuntimeError:
+    except llm.CoordinatorDenied as e:
         raised = True
+        assert "ollama unreachable" in e.detail
 
     assert raised, "judge_local_only swallowed a local failure instead of raising"
     assert calls["claude"] == 0

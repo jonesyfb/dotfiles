@@ -33,6 +33,7 @@ from pathlib import Path
 
 import httpx
 
+import coordinator as _coordinator_module
 from config import GAME_MODE_FLAG, MODELS, OLLAMA_BASE
 
 # ── Interaction ──────────────────────────────────────────────────────────────
@@ -312,6 +313,7 @@ class RuntimeContext:
     tools: ToolAvailability
     desktop: DesktopState
     model_resources: ModelResourceState
+    coordinator: dict  # coordinator.Coordinator.snapshot() — already diagnostic-safe
 
 
 async def collect() -> RuntimeContext:
@@ -327,8 +329,10 @@ async def collect() -> RuntimeContext:
     desktop = await asyncio.to_thread(collect_desktop)
     attention = collect_attention(interaction, desktop)
     model_resources = collect_model_resources(models, loaded, interaction)
+    coordinator_snapshot = _coordinator_module.coordinator.snapshot()
     return RuntimeContext(
-        time.time(), interaction, attention, task, models, tools, desktop, model_resources
+        time.time(), interaction, attention, task, models, tools, desktop,
+        model_resources, coordinator_snapshot,
     )
 
 
@@ -393,4 +397,8 @@ def to_debug_dict(snapshot: RuntimeContext) -> dict:
             "game_mode_restricts_to_personality": snapshot.model_resources.game_mode_restricts_to_personality,
             "cloud_prohibited_for_local_only": snapshot.model_resources.cloud_prohibited_for_local_only,
         },
+        # Already diagnostic-safe by construction (coordinator.snapshot()
+        # only ever emits request_class/purpose/model/label/timing/denial —
+        # never prompts, images, or generated content).
+        "coordinator": snapshot.coordinator,
     }
