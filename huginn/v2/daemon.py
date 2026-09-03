@@ -277,9 +277,11 @@ async def random_chime_worker() -> None:
 
             request = personality.PersonalityRequest(
                 purpose=_AMBIENT_KIND,
+                event_family="resource_observation",
                 facts=facts,
                 severity=decision.severity,
                 interruption_reason=decision.reason,
+                flavor_cues={"subject": "the system", "band": decision.severity, "category": "resource_check"},
                 max_length=120,
                 prohibited_additions=("diagnosis", "recommendation", "urgency", "an action to take"),
                 interaction_mode=snapshot.interaction.mode,
@@ -334,9 +336,10 @@ async def _notify_task_complete(label: str, result: str) -> None:
     try:
         request = personality.PersonalityRequest(
             purpose="task_complete",
+            event_family="task_succeeded",
             facts={"task": label, "result_preview": result[:100]},
-            protected_keys=("task",),
             severity="info",
+            flavor_cues={"subject": "a background task", "category": "background_task", "transition": "completed"},
             interaction_mode="ambient",
         )
         render_result = await personality.render(request, purpose=Purpose.AMBIENT)
@@ -473,14 +476,15 @@ async def _handle_bash_chime(
     try:
         request = personality.PersonalityRequest(
             purpose="bash_event",
+            event_family="command_failed" if failed else "command_slow",
             facts={
                 "command": short_cmd,
                 "exit_code": str(exit_code),
                 "elapsed_seconds": f"{elapsed:.0f}",
                 "outcome": "failed" if failed else "finished (slow)",
             },
-            protected_keys=("command", "exit_code", "elapsed_seconds"),
             severity="notice" if failed else "info",
+            flavor_cues={"category": "shell_command", "band": "elevated" if failed else "normal"},
             prohibited_additions=("a fix", "a diagnosis of the cause") if failed else (),
             interaction_mode="ambient",
         )

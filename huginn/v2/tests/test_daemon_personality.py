@@ -52,7 +52,6 @@ def test_notify_task_complete_uses_rendered_text_on_success(monkeypatch):
 
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
         assert request.purpose == "task_complete"
-        assert "task" in request.protected_keys
         return RenderResult(True, "The frontend build finished. No drama this time.", "No drama this time.", "task: build-frontend", "rendered")
 
     monkeypatch.setattr(personality, "render", fake_render)
@@ -117,7 +116,6 @@ def test_handle_bash_chime_uses_rendered_text_on_success(monkeypatch):
     async def fake_render(request, *, purpose=Purpose.AMBIENT):
         assert request.purpose == "bash_event"
         assert request.severity == "notice"  # exit_code != 0
-        assert "command" in request.protected_keys
         return RenderResult(True, "That command did not go well.", "That command did not go well.", "command: make build", "rendered")
 
     monkeypatch.setattr(personality, "render", fake_render)

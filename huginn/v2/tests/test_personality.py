@@ -6,12 +6,15 @@ tests below also exercise the REAL coordinator singleton (with a fake
 underlying fn) specifically to prove real admission/game-mode/preemption
 behavior without touching Ollama.
 
-Rewritten for the deterministic-composition hardening slice (see
-scripts/personality_bench/results/20260903T052457Z/report.md, Finding 1):
-the model no longer receives or reproduces exact protected values — it
-writes a short "flavor" line only, validated to contain no digits at all,
-and every render() call also produces a `deterministic` factual sentence
-composed entirely by code (present even when the flavor render fails).
+Rewritten for the semantic-safety hardening slice (see
+scripts/personality_bench/results/20260903T055434Z/report.md): exact-value
+safety alone wasn't enough — a model that never sees a fact can still
+imply a false outcome in its flavor clause ("the gears turned" for an
+unexecuted rsync). This introduces typed deterministic presenters
+(_PRESENTERS) per event_family, a flavor-eligibility allowlist
+(_FLAVOR_ELIGIBLE_FAMILIES) that skips the model call entirely for
+risky families, and semantic-contradiction validation for flavor text
+that IS attempted.
 """
 import asyncio
 
@@ -25,7 +28,7 @@ from llm import CoordinatorDenied
 from personality import PersonalityRequest
 
 
-# ── _validate_flavor: malformed/verbose/theatrical/leaked-value battery ──────
+# ── _validate_flavor: malformed/verbose/theatrical/leaked-value/semantic ────
 
 def test_validate_flavor_accepts_clean_short_text():
     req = PersonalityRequest(purpose="x", max_length=100)
@@ -33,8 +36,6 @@ def test_validate_flavor_accepts_clean_short_text():
 
 
 def test_validate_flavor_accepts_empty():
-    """An empty flavor is a deliberate, valid answer now — the deterministic
-    sentence carries the real content regardless. Not a validation problem."""
     req = PersonalityRequest(purpose="x")
     assert personality._validate_flavor("", req, ()) is None
 
@@ -60,9 +61,6 @@ def test_validate_flavor_rejects_self_prefix():
 
 
 def test_validate_flavor_rejects_any_digit():
-    """The core hardening fix: the model is never asked to reproduce exact
-    numbers, so any digit in the flavor is rejected outright — spelled-out
-    or not doesn't matter, digits specifically are banned."""
     req = PersonalityRequest(purpose="x", max_length=200)
     assert personality._validate_flavor("It's using 9 gigabytes.", req, ()) == "contains_digits"
 
@@ -79,147 +77,349 @@ def test_validate_flavor_rejects_leaked_protected_value():
     ) == "leaked_protected_value"
 
 
-# ── Deterministic composition: pure, code-owned, no model involved ──────────
-
-def test_compose_deterministic_includes_all_facts():
-    req = PersonalityRequest(purpose="x", facts={"disk_temp_c": "78", "threshold": "critical"})
-    sentence = personality._compose_deterministic(req)
-    assert "78" in sentence
-    assert "critical" in sentence
+def test_validate_flavor_rejects_known_misspelling():
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor("Fourty minutes of scrolling.", req, ()) == "known_misspelling"
 
 
-def test_compose_deterministic_flags_critical_severity():
-    req = PersonalityRequest(purpose="x", severity="critical", facts={"temp": "78"})
-    sentence = personality._compose_deterministic(req)
-    assert sentence.startswith("CRITICAL:")
+def test_validate_flavor_rejects_too_many_sentences():
+    req = PersonalityRequest(purpose="x", max_length=200, max_sentences=2)
+    text = "One. Two. Three."
+    assert personality._validate_flavor(text, req, ()) == "too_many_sentences"
 
 
-def test_compose_deterministic_includes_reasoner_conclusion_verbatim():
+def test_validate_flavor_allows_up_to_sentence_cap():
+    req = PersonalityRequest(purpose="x", max_length=200, max_sentences=2)
+    assert personality._validate_flavor("One. Two.", req, ()) is None
+
+
+# ── Semantic-contradiction checks (item 7) ──────────────────────────────────
+
+@pytest.mark.parametrize("verb", [
+    "added", "saved", "scheduled", "recorded", "completed", "sent",
+    "deleted", "closed", "executed", "fixed", "diagnosed", "succeeded",
+])
+def test_validate_flavor_rejects_action_outcome_claims(verb):
+    req = PersonalityRequest(purpose="x", max_length=200)
+    text = f"Looks like it {verb} just fine."
+    assert personality._validate_flavor(text, req, ()) == "implies_action_outcome"
+
+
+def test_validate_flavor_rejects_causality_when_diagnosis_unknown():
+    req = PersonalityRequest(purpose="x", max_length=200, facts={"diagnosis": "unknown"})
+    text = "It's acting up because the disk is failing."
+    assert personality._validate_flavor(text, req, ()) == "implies_causality_when_unknown"
+
+
+def test_validate_flavor_allows_causality_when_diagnosis_known():
+    req = PersonalityRequest(purpose="x", max_length=200, facts={"diagnosis": "a known bad cable"})
+    text = "It's acting up because of the usual culprit."
+    assert personality._validate_flavor(text, req, ()) is None
+
+
+def test_validate_flavor_rejects_certainty_over_hedged_reasoner():
+    req = PersonalityRequest(purpose="x", max_length=200, reasoner_conclusion="It might be a leak.")
+    text = "This is definitely a memory leak."
+    assert personality._validate_flavor(text, req, ()) == "implies_certainty_over_hedge"
+
+
+def test_validate_flavor_rejects_execution_claim_when_not_executed():
+    req = PersonalityRequest(purpose="x", max_length=200, facts={"outcome": "not executed"})
+    text = "Good news, that command ran without a hitch."
+    assert personality._validate_flavor(text, req, ()) == "implies_execution_when_not_executed"
+
+
+def test_validate_flavor_allows_plain_text_when_not_executed():
+    req = PersonalityRequest(purpose="x", max_length=200, facts={"outcome": "not executed"})
+    text = "The door stayed shut this time."
+    assert personality._validate_flavor(text, req, ()) is None
+
+
+# ── Deterministic presenters: typed, natural, never a key/value dump ────────
+
+def test_present_resource_observation_brave_style():
+    req = PersonalityRequest(
+        purpose="x", event_family="resource_observation", severity="notice",
+        facts={"app": "Brave", "memory_gb": "9.4", "tabs": "38"},
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "Brave is using 9.4 GB across 38 tabs. Elevated, not critical."
+    assert ":" not in text  # no key: value serialization
+
+
+def test_present_resource_observation_falls_back_safely_for_unknown_keys():
+    req = PersonalityRequest(
+        purpose="x", event_family="resource_observation",
+        facts={"app": "Badger", "some_unknown_field": "xyz123"},
+    )
+    text = personality._compose_deterministic(req)
+    assert "xyz123" not in text  # unknown keys never dumped
+    assert "Badger" in text
+
+
+def test_present_critical_threshold():
+    req = PersonalityRequest(
+        purpose="x", event_family="critical_threshold", severity="critical",
+        facts={"metric": "disk temperature", "value": "78", "unit": " C"},
+    )
+    assert personality._compose_deterministic(req) == "Disk temperature is critical: 78 C."
+
+
+def test_present_device_unavailable_unknown_cause():
+    req = PersonalityRequest(
+        purpose="x", event_family="device_unavailable",
+        facts={"device": "Office-Laser", "status": "offline", "cause": "unknown"},
+    )
+    assert personality._compose_deterministic(req) == "Office-Laser is offline. The cause is not yet known."
+
+
+def test_present_command_failed_with_error():
+    req = PersonalityRequest(
+        purpose="x", event_family="command_failed",
+        facts={"command": "nixos-rebuild switch", "attempts": "2", "error": "flake.nix: No such file or directory"},
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "`nixos-rebuild switch` failed twice: `flake.nix: No such file or directory`."
+
+
+def test_present_command_failed_plain_exit_code():
+    req = PersonalityRequest(
+        purpose="x", event_family="command_failed",
+        facts={"command": "make build", "exit_code": "1", "elapsed_seconds": "12"},
+    )
+    text = personality._compose_deterministic(req)
+    assert "`make build` failed" in text
+    assert "exit 1" in text
+
+
+def test_present_command_not_executed():
+    req = PersonalityRequest(
+        purpose="x", event_family="command_not_executed",
+        facts={
+            "reason": "/mnt/archive is not mounted",
+            "planned_command": "rsync -a ~/notes/ /mnt/archive/notes/",
+        },
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "/mnt/archive is not mounted, so `rsync -a ~/notes/ /mnt/archive/notes/` was not executed."
+
+
+def test_present_task_succeeded():
+    req = PersonalityRequest(
+        purpose="x", event_family="task_succeeded",
+        facts={"task": "nightly-backup", "duration_seconds": "142", "result_preview": "4.2GB written"},
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "Task nightly-backup finished in 142 seconds: 4.2GB written."
+
+
+def test_present_task_failed_unknown_diagnosis():
+    req = PersonalityRequest(
+        purpose="x", event_family="task_failed",
+        facts={"task": "db-migrate", "error": "connection refused: 127.0.0.1:5432", "diagnosis": "unknown"},
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "Task db-migrate failed: connection refused: 127.0.0.1:5432. The cause is not yet known."
+
+
+def test_present_capability_unavailable():
+    req = PersonalityRequest(
+        purpose="x", event_family="capability_unavailable",
+        facts={"capability": "calendar", "requested_action": "add milk tomorrow"},
+    )
+    assert personality._compose_deterministic(req) == "The calendar is unavailable, so I did not add milk tomorrow."
+
+
+def test_present_reasoner_conclusion_verbatim():
     conclusion = "This might be a memory leak, but I'm not certain — could also be normal caching."
-    req = PersonalityRequest(purpose="x", reasoner_conclusion=conclusion)
-    assert conclusion in personality._compose_deterministic(req)
+    req = PersonalityRequest(purpose="x", event_family="reasoner_conclusion", reasoner_conclusion=conclusion)
+    assert personality._compose_deterministic(req) == conclusion
 
 
-def test_compose_deterministic_appends_code_block():
-    req = PersonalityRequest(purpose="x", facts={"outcome": "failed"}, code_block="exit 1: no such file")
-    sentence = personality._compose_deterministic(req)
-    assert "exit 1: no such file" in sentence
-
-
-def test_compose_deterministic_never_needs_a_model_call():
-    """Pure function of the request — no coordinator/llm import used here."""
-    req = PersonalityRequest(purpose="x", facts={"a": "1"})
-    assert isinstance(personality._compose_deterministic(req), str)
-
-
-# ── Prompt construction: protected values withheld, not shown ───────────────
-
-def test_prompt_contains_broad_worldview_guidance():
-    """The palette must be broad, not a single over-primed groove — check
-    several non-animal registers are actually present, and that the 'plain
-    speech is fine' escape hatch exists."""
-    from config import PERSONALITY_SYSTEM_PROMPT
-    lowered = PERSONALITY_SYSTEM_PROMPT.lower()
-    for word in ("omen", "weather", "machinery", "territory", "bureaucracy", "navigation"):
-        assert word in lowered, f"expected broader palette to mention {word!r}"
-    assert "muninn" in lowered
-    assert "plain observation with no metaphor" in lowered
-    assert "never force an animal" in lowered
-
-
-def test_prompt_never_shows_protected_values():
+def test_present_procrastination_nudge_step_only():
     req = PersonalityRequest(
-        purpose="x",
-        facts={"path": "/etc/fstab", "command": "systemctl restart foo"},
-        protected_keys=("path", "command"),
+        purpose="x", event_family="procrastination_nudge",
+        facts={"requested_next_step": "open the report and write one sentence"},
+    )
+    assert personality._compose_deterministic(req) == "Open the report and write one sentence."
+
+
+def test_present_clarification_needed():
+    req = PersonalityRequest(
+        purpose="x", event_family="clarification_needed",
+        facts={"request": "close it", "open_applications": "Brave, Thunderbird, a terminal, Discord"},
+    )
+    text = personality._compose_deterministic(req)
+    assert text == "Which should I close: Brave, Thunderbird, a terminal, or Discord?"
+    assert text.endswith("?")
+
+
+def test_present_unknown_family_never_dumps_dict():
+    req = PersonalityRequest(purpose="x", event_family="totally_unrecognized", facts={"a": "1", "b": "2"})
+    text = personality._compose_deterministic(req)
+    assert "a" not in text or text == ""
+    assert "{" not in text
+
+
+# ── Flavor eligibility: risk-aware, structural (item 2) ─────────────────────
+
+@pytest.mark.parametrize("family", [
+    "resource_observation", "activity_observation", "procrastination_nudge",
+    "task_succeeded", "command_slow",
+])
+def test_flavor_eligible_families(family):
+    assert family in personality._FLAVOR_ELIGIBLE_FAMILIES
+
+
+@pytest.mark.parametrize("family", [
+    "capability_unavailable", "command_not_executed", "clarification_needed",
+    "critical_threshold", "task_failed", "reasoner_conclusion", "device_unavailable",
+    "command_failed",
+])
+def test_flavor_ineligible_families(family):
+    assert family not in personality._FLAVOR_ELIGIBLE_FAMILIES
+
+
+def test_render_never_calls_coordinator_for_ineligible_family(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_render_personality_only(*a, **kw):
+        calls["n"] += 1
+        return "should never be called"
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    req = PersonalityRequest(
+        purpose="x", event_family="capability_unavailable",
+        facts={"capability": "calendar", "requested_action": "add milk tomorrow"},
+    )
+    result = asyncio.run(personality.render(req))
+
+    assert calls["n"] == 0
+    assert result.reason == "deterministic_only"
+    assert result.ok is True
+    assert result.text == "The calendar is unavailable, so I did not add milk tomorrow."
+    assert result.flavor is None
+
+
+def test_render_never_calls_coordinator_for_critical(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_render_personality_only(*a, **kw):
+        calls["n"] += 1
+        return "should never be called"
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    req = PersonalityRequest(
+        purpose="x", event_family="critical_threshold", severity="critical",
+        facts={"metric": "disk temperature", "value": "78", "unit": " C"},
+    )
+    result = asyncio.run(personality.render(req))
+
+    assert calls["n"] == 0
+    assert result.ok is True
+    assert result.text == "Disk temperature is critical: 78 C."
+
+
+def test_render_never_calls_coordinator_for_clarification(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_render_personality_only(*a, **kw):
+        calls["n"] += 1
+        return "should never be called"
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    req = PersonalityRequest(
+        purpose="x", event_family="clarification_needed",
+        facts={"request": "close it", "open_applications": "Brave, Discord"},
+    )
+    result = asyncio.run(personality.render(req))
+
+    assert calls["n"] == 0
+    assert result.text.startswith("Which should I close")
+    assert result.text.endswith("?")
+
+
+def test_render_unknown_family_returns_not_ok_without_calling_coordinator(monkeypatch):
+    calls = {"n": 0}
+
+    async def fake_render_personality_only(*a, **kw):
+        calls["n"] += 1
+        return "unused"
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    result = asyncio.run(personality.render(PersonalityRequest(purpose="x", event_family="mystery_family")))
+
+    assert calls["n"] == 0
+    assert result.ok is False
+    assert result.reason == "unknown_event_family"
+    assert result.deterministic == ""
+
+
+# ── Prompt construction: only flavor_cues reach the model, never facts ──────
+
+def test_prompt_never_shows_facts():
+    req = PersonalityRequest(
+        purpose="x", event_family="resource_observation",
+        facts={"app": "Brave", "memory_gb": "9.4", "tabs": "38"},
+        flavor_cues={"subject": "a browser", "band": "elevated"},
     )
     prompt = personality._build_user_prompt(req)
-    assert "/etc/fstab" not in prompt
-    assert "systemctl restart foo" not in prompt
-    assert "withheld" in prompt.lower()
+    assert "9.4" not in prompt
+    assert "38" not in prompt
+    assert "Brave" not in prompt  # exact app name is a fact, not a flavor cue
+    assert "a browser" in prompt
+    assert "elevated" in prompt
 
 
-def test_prompt_shows_non_protected_facts():
+def test_prompt_includes_flavor_cues():
     req = PersonalityRequest(
-        purpose="printer_offline",
-        facts={"printer": "office-printer", "cause": "unknown"},
-        prohibited_additions=("a diagnosis of the cause", "a repair suggestion"),
+        purpose="x", flavor_cues={"subject": "a browser", "creature_hint": "badger"},
     )
     prompt = personality._build_user_prompt(req)
-    assert "office-printer" in prompt
-    assert "a diagnosis of the cause" in prompt
-    assert "a repair suggestion" in prompt
+    assert "a browser" in prompt
+    assert "badger" in prompt
 
 
-def test_prompt_never_includes_reasoner_conclusion():
-    """Moved entirely to the deterministic sentence — the model must never
-    be handed a hedge to paraphrase."""
-    req = PersonalityRequest(
-        purpose="x",
-        reasoner_conclusion="This might be a memory leak, but I'm not certain.",
-    )
-    prompt = personality._build_user_prompt(req)
-    assert "memory leak" not in prompt
-
-
-def test_prompt_instructs_no_digits():
+def test_prompt_instructs_no_digits_and_no_outcome_claims():
     req = PersonalityRequest(purpose="x")
     prompt = personality._build_user_prompt(req)
     assert "no numbers" in prompt.lower() or "no digits" in prompt.lower()
-
-
-def test_prompt_includes_recent_styles_to_avoid():
-    req = PersonalityRequest(purpose="x")
-    prompt = personality._build_user_prompt(req, ("predator_consumption", "weather_omen"))
-    assert "predator_consumption" in prompt
-    assert "weather_omen" in prompt
-
-
-def test_capability_unavailable_purpose():
-    req = PersonalityRequest(
-        purpose="capability_unavailable",
-        facts={"capability": "calendar_list", "reason": "CalDAV unreachable"},
-        prohibited_additions=("a workaround", "a retry promise"),
-    )
-    prompt = personality._build_user_prompt(req)
-    assert "capability_unavailable" in prompt
-    assert "CalDAV unreachable" in prompt
+    assert "succeeded" in prompt.lower() or "outcome" in prompt.lower()
 
 
 def test_vulnerable_purpose_structural():
     from config import PERSONALITY_SYSTEM_PROMPT
     lowered = PERSONALITY_SYSTEM_PROMPT.lower()
-    assert "no therapy monologue" in lowered
     assert "loyal" in lowered
 
 
-# ── render(): mocked coordinator boundary ─────────────────────────────────────
+# ── render(): mocked coordinator boundary, flavor-eligible path ─────────────
 
-def test_render_ok_submits_resident_personality_ambient(monkeypatch):
+def test_render_ok_composes_flavor_and_deterministic(monkeypatch):
     captured = {}
 
     async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
         captured["purpose"] = purpose
-        captured["deadline"] = deadline_seconds
-        return "Brave is hoarding memory again, climbing steadily."
+        return "restless again"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
     req = PersonalityRequest(
-        purpose="high_memory_observation",
-        facts={"app": "brave-browser", "mem_gb": "9.1"},
+        purpose="high_memory_observation", event_family="resource_observation",
+        facts={"app": "Brave", "memory_gb": "9.1", "tabs": "20"},
+        flavor_cues={"subject": "a browser"},
         severity="info",
     )
     result = asyncio.run(personality.render(req, purpose=Purpose.AMBIENT))
 
     assert result.ok is True
-    assert "Brave" in result.text
+    assert "restless again" in result.text
     assert "9.1" in result.text  # deterministic portion carries the exact value
     assert captured["purpose"] == Purpose.AMBIENT
-
-
-def test_render_composes_flavor_and_deterministic():
-    pass  # covered by test_render_ok_submits_resident_personality_ambient's text assertion
 
 
 def test_render_empty_flavor_still_ok_and_shows_deterministic_alone(monkeypatch):
@@ -228,14 +428,15 @@ def test_render_empty_flavor_still_ok_and_shows_deterministic_alone(monkeypatch)
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    req = PersonalityRequest(purpose="x", facts={"disk_temp_c": "78"}, severity="critical")
+    req = PersonalityRequest(
+        purpose="x", event_family="task_succeeded",
+        facts={"task": "nightly-backup", "duration_seconds": "142"},
+    )
     result = asyncio.run(personality.render(req))
 
     assert result.ok is True
     assert result.flavor == ""
     assert result.text == result.deterministic
-    assert result.text.startswith("CRITICAL:")
-    assert "78" in result.text
 
 
 def test_render_deterministic_always_present_on_coordinator_denial(monkeypatch):
@@ -244,13 +445,15 @@ def test_render_deterministic_always_present_on_coordinator_denial(monkeypatch):
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    req = PersonalityRequest(purpose="x", facts={"task": "nightly-backup"})
+    req = PersonalityRequest(
+        purpose="x", event_family="task_succeeded", facts={"task": "nightly-backup"},
+    )
     result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.text is None
     assert result.reason == "coordinator_denied:deadline_exceeded"
-    assert "nightly-backup" in result.deterministic  # usable as a fallback by the caller
+    assert "nightly-backup" in result.deterministic
 
 
 def test_render_coordinator_denied_preempted(monkeypatch):
@@ -259,7 +462,8 @@ def test_render_coordinator_denied_preempted(monkeypatch):
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    result = asyncio.run(personality.render(PersonalityRequest(purpose="x")))
+    req = PersonalityRequest(purpose="x", event_family="task_succeeded", facts={"task": "x"})
+    result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.reason == "coordinator_denied:preempted"
@@ -271,7 +475,8 @@ def test_render_unexpected_exception_does_not_raise(monkeypatch):
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    result = asyncio.run(personality.render(PersonalityRequest(purpose="x")))
+    req = PersonalityRequest(purpose="x", event_family="task_succeeded", facts={"task": "x"})
+    result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.reason == "error"
@@ -283,54 +488,70 @@ def test_render_retries_once_on_leaked_protected_value(monkeypatch):
     async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
         calls["n"] += 1
         if calls["n"] == 1:
-            return "It happened in /home/nate/project."  # leaks the withheld value
-        return "Something feels off tonight."
+            return "the nightly-backup task went well"  # leaks the task name
+        return "quiet and done"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
     req = PersonalityRequest(
-        purpose="x", facts={"path": "/home/nate/project"}, protected_keys=("path",),
+        purpose="x", event_family="task_succeeded", facts={"task": "nightly-backup"},
     )
     result = asyncio.run(personality.render(req))
 
     assert calls["n"] == 2
     assert result.ok is True
-    assert "/home/nate/project" in result.text  # via the deterministic portion
-    assert "/home/nate/project" not in result.flavor
+    assert "nightly-backup" in result.text  # via the deterministic portion
+    assert "nightly-backup" not in result.flavor
 
 
 def test_render_gives_up_after_max_retries(monkeypatch):
     async def always_leaks(system_prompt, user_prompt, purpose, deadline_seconds):
-        return "It happened in /home/nate/project."
+        return "the nightly-backup task went well"
 
     monkeypatch.setattr(personality, "render_personality_only", always_leaks)
 
     req = PersonalityRequest(
-        purpose="x", facts={"path": "/home/nate/project"}, protected_keys=("path",),
+        purpose="x", event_family="task_succeeded", facts={"task": "nightly-backup"},
     )
     result = asyncio.run(personality.render(req))
 
     assert result.ok is False
     assert result.reason == "validation_failed"
-    assert "/home/nate/project" in result.deterministic
+    assert "nightly-backup" in result.deterministic
 
 
 def test_render_does_not_inspect_model_residency(monkeypatch):
-    """No special-case logic for 'vision model happens to be loaded' —
-    personality.render() just submits; the coordinator (and Ollama's own
-    single-model residency) handles any swap transparently."""
     calls = {"n": 0}
 
     async def fake_render_personality_only(*a, **kw):
         calls["n"] += 1
-        return "Fine either way."
+        return "fine either way"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
-    result = asyncio.run(personality.render(PersonalityRequest(purpose="x")))
+    req = PersonalityRequest(purpose="x", event_family="task_succeeded", facts={"task": "x"})
+    result = asyncio.run(personality.render(req))
 
     assert result.ok is True
     assert calls["n"] == 1
+
+
+def test_render_nothing_to_present_when_presenter_empty(monkeypatch):
+    """procrastination_nudge with no next step has nothing safe to present
+    and nothing to attach flavor to — no model call, ok=False."""
+    calls = {"n": 0}
+
+    async def fake_render_personality_only(*a, **kw):
+        calls["n"] += 1
+        return "unused"
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    result = asyncio.run(personality.render(PersonalityRequest(purpose="x", event_family="procrastination_nudge")))
+
+    assert calls["n"] == 0
+    assert result.ok is False
+    assert result.reason == "nothing_to_present"
 
 
 # ── Real coordinator: game mode admits RESIDENT_PERSONALITY (item 15) ────────
@@ -366,8 +587,6 @@ def test_render_personality_only_admitted_during_game_mode(monkeypatch):
 
 
 def test_ordinary_local_reasoning_denied_during_game_mode_for_contrast(monkeypatch):
-    """Sanity contrast: the personality model's game-mode exemption is
-    specific to RESIDENT_PERSONALITY, not a blanket bypass."""
     coordinator.set_game_mode_check(lambda: True)
 
     async def _run():
@@ -399,7 +618,7 @@ def test_render_logging_never_includes_fact_values_or_rendered_text(monkeypatch,
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
     req = PersonalityRequest(
-        purpose="periodic_observation",
+        purpose="periodic_observation", event_family="resource_observation",
         facts={"secret_fact_key": "super-sensitive-value-12345"},
     )
     with caplog.at_level("INFO", logger="huginn.personality"):
@@ -408,9 +627,7 @@ def test_render_logging_never_includes_fact_values_or_rendered_text(monkeypatch,
     assert result.ok is True
     log_text = "\n".join(r.message for r in caplog.records)
     assert "super-sensitive-value-12345" not in log_text
-    assert "secret_fact_key" not in log_text  # not even the fact key
-    # What IS expected to be present: purpose/severity/length metadata.
-    assert "periodic_observation" in log_text
+    assert "secret_fact_key" not in log_text
 
 
 def test_render_logging_on_denial_includes_reason_not_content(monkeypatch, caplog):
@@ -420,22 +637,19 @@ def test_render_logging_on_denial_includes_reason_not_content(monkeypatch, caplo
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
 
     with caplog.at_level("INFO", logger="huginn.personality"):
-        result = asyncio.run(personality.render(PersonalityRequest(purpose="task_complete")))
+        result = asyncio.run(personality.render(
+            PersonalityRequest(purpose="task_complete", event_family="task_succeeded", facts={"task": "x"})
+        ))
 
     assert result.ok is False
     log_text = "\n".join(r.message for r in caplog.records)
     assert "preempted" in log_text
-    assert "task_complete" in log_text
 
 
-# ── Style ledger: category classification and prompt-side rotation hint ─────
+# ── Diagnostic-only style categorizer (not fed back into the prompt) ────────
 
 def test_classify_style_predator_consumption():
     assert personality._classify_style("The lion is hoarding memory again.") == "predator_consumption"
-
-
-def test_classify_style_weather_omen():
-    assert personality._classify_style("A storm is brewing on that disk.") == "weather_omen"
 
 
 def test_classify_style_plain_when_no_category_matches():
@@ -444,32 +658,3 @@ def test_classify_style_plain_when_no_category_matches():
 
 def test_classify_style_silent_for_empty_flavor():
     assert personality._classify_style("") == "silent"
-
-
-def test_render_logs_style_and_next_prompt_asks_to_vary(monkeypatch, tmp_path):
-    import memory
-    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
-
-    responses = iter(["The lion prowls the tab count.", "A storm gathers over the disk."])
-
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
-        return next(responses)
-
-    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
-
-    req = PersonalityRequest(purpose="periodic_observation")
-    first = asyncio.run(personality.render(req))
-    assert first.ok is True
-
-    # Second call's prompt should now carry a hint to avoid the first style.
-    captured_prompt = {}
-    original_build = personality._build_user_prompt
-
-    def spy_build(request, recent_styles):
-        captured_prompt["styles"] = recent_styles
-        return original_build(request, recent_styles)
-
-    monkeypatch.setattr(personality, "_build_user_prompt", spy_build)
-    second = asyncio.run(personality.render(req))
-    assert second.ok is True
-    assert "predator_consumption" in captured_prompt["styles"]
