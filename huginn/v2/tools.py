@@ -278,6 +278,13 @@ TOOL_DEFINITIONS = [
 # ── Implementations ───────────────────────────────────────────────────────────
 
 async def run_tool(name: str, args: dict) -> str:
+    """Returns a plain string always — this function has never raised to
+    its caller and still doesn't. v2/actions.py is the layer that turns
+    this string into an authoritative ActionState (SUCCEEDED/FAILED/
+    TIMED_OUT/UNAVAILABLE) by checking for the sentinel prefixes
+    "unknown tool:" / "error: timed out" / "error:" below; any other
+    caller still just gets readable text, unchanged behavior from before
+    those sentinels existed."""
     try:
         match name:
             case "shell":
@@ -303,7 +310,13 @@ async def run_tool(name: str, args: dict) -> str:
                 asyncio.ensure_future(
                     _embed_and_store(f"{args['key']}: {args['value']}", "fact")
                 )
-                return f"remembered: {args['key']}"
+                # Includes the actual value now, not just the key — a
+                # follow-up composer with only "remembered: favorite_color"
+                # and no anchor for the value had nothing authoritative to
+                # quote, and would reconstruct (and sometimes embellish,
+                # observed live: "green" -> "Mint green") from its own
+                # memory of the conversation instead.
+                return f"remembered: {args['key']}={args['value']}"
             case "search_memory":
                 return await _search_memory(args["query"], args.get("limit", 5))
             case "queue_task":
@@ -316,6 +329,8 @@ async def run_tool(name: str, args: dict) -> str:
                 return f"forgotten: {args['key']}"
             case _:
                 return f"unknown tool: {name}"
+    except asyncio.TimeoutError:
+        return "error: timed out"
     except Exception as e:
         return f"error: {e}"
 

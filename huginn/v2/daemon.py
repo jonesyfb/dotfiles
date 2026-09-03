@@ -12,9 +12,9 @@ import re
 import signal
 import subprocess
 import sys
-import uuid
 from pathlib import Path
 
+import actions
 import ambient
 import context
 import entities
@@ -29,7 +29,7 @@ from memory import (
     enqueue_task, get_pending_tasks, update_task_status, get_all_tasks,
     log_ambient_event, recent_verdicts,
 )
-from tools import TOOL_DEFINITIONS, TOOL_TRUST, run_tool, shell_is_safe
+from tools import TOOL_DEFINITIONS, TOOL_TRUST, shell_is_safe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("huginn")
@@ -81,6 +81,7 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
         content, history=history, entity_note=_entity_note_for(content),
     )
     if result.ok:
+        log.info("final_response_source=personality_direct_social")
         await send(writer, {"type": "token", "content": result.text})
         add_turn("assistant", result.text)
         await send(writer, {"type": "done"})
@@ -92,6 +93,10 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
 
 async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
     decision = intent.classify(content)
+    log.info(
+        "route: intent=%s high_confidence=%s reason=%s",
+        decision.intent.value, decision.high_confidence, decision.reason,
+    )
 
     if decision.intent == intent.IntentClass.SOCIAL_DIRECT and decision.high_confidence:
         add_turn("user", content)
@@ -107,10 +112,59 @@ async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
     await _handle_chat_via_existing_route(writer, content)
 
 
+_CALENDAR_WRITE_RE = re.compile(
+    r"\b(add|schedule|put|create)\b[^.!?\n]{0,40}\bcalendar\b|"
+    r"\bcalendar\b[^.!?\n]{0,40}\b(add|schedule|put|create)\b",
+    re.I,
+)
+
+
+def _requests_calendar_write(content: str) -> bool:
+    """No calendar-write tool exists (only read-only calendar_list) — this
+    is a deterministic, upstream short-circuit for that specific, real,
+    reproduced gap (scripts/direct_chat_bench/results/20260903T080001Z):
+    the model was never given a chance to free-associate tool-call-shaped
+    prose about a capability it plainly doesn't have, because it's never
+    invoked for this pattern at all. A read request ("what's on my
+    calendar") has no add/schedule/put/create verb and correctly falls
+    through to the normal tool flow (calendar_list)."""
+    return bool(_CALENDAR_WRITE_RE.search(content))
+
+
+# Defense-in-depth only — the structural guarantee is that stream_ollama/
+# stream_claude never create a tool_call event from anything but the
+# backend's own native structured field (confirmed: no text-based tool-call
+# parsing exists anywhere in llm.py). This regex cannot grant prose any
+# execution power; it only flags plain content that LOOKS like a tool
+# transcript so the record isn't poisoned by treating it as a real turn.
+_FAKE_TOOL_MARKUP_RE = re.compile(
+    r"(^|\n)\s*\[tool[^\]]*\]|"
+    r"\bassistant\s+to\s*=|"
+    r"</?(tool_call|function_call)>|"
+    r'"name"\s*:\s*"[a-zA-Z_]+"\s*,\s*"arguments"',
+    re.I,
+)
+
+
 async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content: str) -> None:
-    """Unmodified from before the direct-social routing layer existed —
-    route_model()/stream_chat()/tool-calling loop, exactly as always."""
+    """route_model()/stream_chat()/tool-calling loop. Tool execution now
+    goes through actions.execute() (authoritative state, never a bare
+    string handed straight to a follow-up model) and a consequential
+    tool's final response is composed deterministically from that state —
+    never from a second free-form completion. Read-only tools are
+    unaffected: the model still narrates calendar_list/recall/search
+    results freely, since there's no state-change claim about those to
+    get wrong."""
+    if _requests_calendar_write(content):
+        log.info("final_response_source=calendar_write_unavailable_shortcut")
+        response = actions.compose_calendar_write_unavailable()
+        await send(writer, {"type": "token", "content": response})
+        add_turn("assistant", response)
+        await send(writer, {"type": "done"})
+        return
+
     model_key = route_model(content)
+    log.info("route: model=%s", model_key)
 
     history = get_history(limit=40)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
@@ -129,6 +183,18 @@ async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content:
         elif ev["type"] == "done":
             break
 
+    if not tool_calls_made and full_response and _FAKE_TOOL_MARKUP_RE.search(full_response):
+        # No real structured tool call happened — this is plain content
+        # that merely looks like one. Already streamed (can't unsend), so
+        # correct the record in-band rather than storing it as a genuine
+        # turn a future completion could treat as something that occurred.
+        log.info("final_response_source=fake_tool_markup_correction structured_tool_call_received=False")
+        correction = "(No tool actually ran there — I don't have one for this.)"
+        await send(writer, {"type": "token", "content": "\n\n" + correction})
+        add_turn("assistant", correction)
+        await send(writer, {"type": "done"})
+        return
+
     # Process tool calls
     if tool_calls_made:
         if full_response:
@@ -136,6 +202,7 @@ async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content:
             full_response = ""
 
         tool_results = []
+        deterministic_records: list[actions.ActionRecord] = []
         for tc in tool_calls_made:
             name = tc["tool"]
             args = tc.get("args", {})
@@ -146,30 +213,61 @@ async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content:
                 trust = "auto"
 
             if trust == "confirm":
-                confirm_id = str(uuid.uuid4())
-                _pending_confirms[confirm_id] = {
-                    "tool": name, "args": args, "writer": writer,
+                record = actions.propose(name, args, trust)
+                _pending_confirms[record.action_id] = {
+                    "record": record, "writer": writer,
                     "tool_calls": tool_calls_made, "history": get_history(40),
                     "model_key": model_key,
                 }
                 await send(writer, {
                     "type": "confirm_required",
-                    "id": confirm_id,
+                    "id": record.action_id,
                     "tool": name,
                     "args": args,
                 })
                 return  # caller will resume via handle_confirm
             else:
                 await send(writer, {"type": "tool_call", "tool": name, "args": args})
-                result = await run_tool(name, args)
-                await send(writer, {"type": "tool_result", "tool": name, "output": result})
-                tool_results.append({
-                    "role": "tool",
-                    "content": result,
-                    "name": name,
+                record = actions.propose(name, args, trust)
+                record = await actions.execute(record)
+                log.info("action: tool=%s trust=%s state=%s", name, trust, record.state.value)
+                await send(writer, {
+                    "type": "tool_result", "tool": name,
+                    "output": record.result if record.state == actions.ActionState.SUCCEEDED else (record.error or ""),
                 })
+                # Deterministic composition applies whenever the tool is
+                # state-changing OR it simply didn't cleanly succeed — a
+                # failed/unavailable/timed-out call to even a read-only
+                # tool (e.g. an unknown/hallucinated tool name) must not
+                # be handed to a free-form completion that could narrate
+                # around the failure instead of stating it. Free narration
+                # is reserved for the one safe case: a read-only tool that
+                # actually succeeded.
+                if actions.is_consequential(name) or record.state != actions.ActionState.SUCCEEDED:
+                    deterministic_records.append(record)
+                else:
+                    tool_results.append({
+                        "role": "tool",
+                        "content": record.result,
+                        "name": name,
+                    })
+
+        if deterministic_records:
+            # A state-changing (or non-succeeding) tool ran this turn —
+            # the final word comes from what actually happened, never a
+            # second free-form completion that could drift from it
+            # (observed live: a successful `remember` narrated as "Mint
+            # green" when the tool result — now fixed separately — didn't
+            # even say that).
+            log.info("final_response_source=deterministic_action_composer")
+            response = " ".join(actions.compose_response(r) for r in deterministic_records)
+            await send(writer, {"type": "token", "content": response})
+            add_turn("assistant", response)
+            await send(writer, {"type": "done"})
+            return
 
         if tool_results:
+            log.info("final_response_source=model_narration_of_readonly_result")
             # Ollama expects: assistant msg with tool_calls field, then tool result msgs
             asst_tool_msg = {
                 "role": "assistant",
@@ -222,32 +320,55 @@ async def handle_confirm(writer: asyncio.StreamWriter, confirm_id: str, approved
         return
 
     await send(writer, {"type": "confirm_ack", "approved": approved})
+    record: actions.ActionRecord = pending["record"]
+
+    log.info("confirm: tool=%s approved=%s", record.tool, approved)
 
     if not approved:
-        add_turn("assistant", "[tool denied]")
-        await send(writer, {"type": "token", "content": "Denied."})
+        record = actions.deny(record)
+        log.info("action: tool=%s trust=%s state=%s", record.tool, record.trust_tier, record.state.value)
+        response = actions.compose_response(record)
+        add_turn("assistant", response)
+        await send(writer, {"type": "token", "content": response})
         await send(writer, {"type": "done"})
         return
 
-    name = pending["tool"]
-    args = pending["args"]
-    model_key = pending["model_key"]
-
+    name, args = record.tool, record.args
     await send(writer, {"type": "tool_call", "tool": name, "args": args})
-    result = await run_tool(name, args)
-    await send(writer, {"type": "tool_result", "tool": name, "output": result})
+    record = await actions.execute(record)
+    log.info("action: tool=%s trust=%s state=%s", name, record.trust_tier, record.state.value)
+    await send(writer, {
+        "type": "tool_result", "tool": name,
+        "output": record.result if record.state == actions.ActionState.SUCCEEDED else (record.error or ""),
+    })
 
+    # Every current confirm-tier tool (shell, write_file, queue_task,
+    # claude_code) is consequential, so this is almost always the composer
+    # in practice — the state!=SUCCEEDED half of the check additionally
+    # covers a failed/timed-out/unavailable confirm-tier call, same rule
+    # as the auto-tier path above.
+    if actions.is_consequential(name) or record.state != actions.ActionState.SUCCEEDED:
+        log.info("final_response_source=deterministic_action_composer")
+        response = actions.compose_response(record)
+        add_turn("assistant", response)
+        await send(writer, {"type": "token", "content": response})
+        await send(writer, {"type": "done"})
+        return
+
+    log.info("final_response_source=model_narration_of_readonly_result")
     history = pending["history"]
+    model_key = pending["model_key"]
     asst_tool_msg = {
         "role": "assistant",
         "content": "",
         "tool_calls": [{"function": {"name": name, "arguments": args}}],
     }
+    result_content = record.result if record.state == actions.ActionState.SUCCEEDED else f"[{record.state.value}] {record.error or ''}"
     follow_messages = (
         [{"role": "system", "content": SYSTEM_PROMPT}]
         + history
         + [asst_tool_msg]
-        + [{"role": "tool", "content": result}]
+        + [{"role": "tool", "content": result_content}]
     )
 
     full_response = ""
