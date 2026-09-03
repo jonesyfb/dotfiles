@@ -104,6 +104,12 @@ def _init(c: sqlite3.Connection) -> None:
             ts     INTEGER DEFAULT (unixepoch()),
             PRIMARY KEY (kind, metric)
         );
+        CREATE TABLE IF NOT EXISTS style_ledger (
+            id       INTEGER PRIMARY KEY AUTOINCREMENT,
+            purpose  TEXT NOT NULL,
+            category TEXT NOT NULL,
+            ts       INTEGER DEFAULT (unixepoch())
+        );
     """)
     if _VEC_AVAILABLE:
         try:
@@ -407,3 +413,27 @@ def set_baseline(kind: str, metric: str, value: float) -> None:
             "ON CONFLICT(kind, metric) DO UPDATE SET value=excluded.value, ts=unixepoch()",
             (kind, metric, value),
         )
+
+
+# ── Personality renderer: recent-style ledger ───────────────────────────────────
+# Stylistic fingerprints only (a category label like "predator_consumption"),
+# never message content or desktop context — used so the renderer can nudge
+# itself away from repeating the same metaphor family back-to-back.
+
+def log_style(purpose: str, category: str) -> None:
+    with db() as c:
+        c.execute("INSERT INTO style_ledger(purpose, category) VALUES(?,?)", (purpose, category))
+        c.execute(
+            "DELETE FROM style_ledger WHERE purpose=? AND id NOT IN "
+            "(SELECT id FROM style_ledger WHERE purpose=? ORDER BY id DESC LIMIT 20)",
+            (purpose, purpose),
+        )
+
+
+def recent_styles(purpose: str, limit: int = 3) -> list[str]:
+    with db() as c:
+        rows = c.execute(
+            "SELECT category FROM style_ledger WHERE purpose=? ORDER BY id DESC LIMIT ?",
+            (purpose, limit),
+        ).fetchall()
+        return [r["category"] for r in rows]

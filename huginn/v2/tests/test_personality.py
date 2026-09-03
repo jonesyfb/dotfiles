@@ -114,13 +114,17 @@ def test_compose_deterministic_never_needs_a_model_call():
 
 # ── Prompt construction: protected values withheld, not shown ───────────────
 
-def test_prompt_contains_worldview_guidance():
+def test_prompt_contains_broad_worldview_guidance():
+    """The palette must be broad, not a single over-primed groove — check
+    several non-animal registers are actually present, and that the 'plain
+    speech is fine' escape hatch exists."""
     from config import PERSONALITY_SYSTEM_PROMPT
     lowered = PERSONALITY_SYSTEM_PROMPT.lower()
-    assert "brave" in lowered and "lion" in lowered
-    assert "thunderbird" in lowered
+    for word in ("omen", "weather", "machinery", "territory", "bureaucracy", "navigation"):
+        assert word in lowered, f"expected broader palette to mention {word!r}"
     assert "muninn" in lowered
-    assert "never force a creature" in lowered
+    assert "plain observation with no metaphor" in lowered
+    assert "never force an animal" in lowered
 
 
 def test_prompt_never_shows_protected_values():
@@ -162,6 +166,13 @@ def test_prompt_instructs_no_digits():
     req = PersonalityRequest(purpose="x")
     prompt = personality._build_user_prompt(req)
     assert "no numbers" in prompt.lower() or "no digits" in prompt.lower()
+
+
+def test_prompt_includes_recent_styles_to_avoid():
+    req = PersonalityRequest(purpose="x")
+    prompt = personality._build_user_prompt(req, ("predator_consumption", "weather_omen"))
+    assert "predator_consumption" in prompt
+    assert "weather_omen" in prompt
 
 
 def test_capability_unavailable_purpose():
@@ -415,3 +426,50 @@ def test_render_logging_on_denial_includes_reason_not_content(monkeypatch, caplo
     log_text = "\n".join(r.message for r in caplog.records)
     assert "preempted" in log_text
     assert "task_complete" in log_text
+
+
+# ── Style ledger: category classification and prompt-side rotation hint ─────
+
+def test_classify_style_predator_consumption():
+    assert personality._classify_style("The lion is hoarding memory again.") == "predator_consumption"
+
+
+def test_classify_style_weather_omen():
+    assert personality._classify_style("A storm is brewing on that disk.") == "weather_omen"
+
+
+def test_classify_style_plain_when_no_category_matches():
+    assert personality._classify_style("Nothing much going on.") == "plain"
+
+
+def test_classify_style_silent_for_empty_flavor():
+    assert personality._classify_style("") == "silent"
+
+
+def test_render_logs_style_and_next_prompt_asks_to_vary(monkeypatch, tmp_path):
+    import memory
+    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
+
+    responses = iter(["The lion prowls the tab count.", "A storm gathers over the disk."])
+
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+        return next(responses)
+
+    monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
+
+    req = PersonalityRequest(purpose="periodic_observation")
+    first = asyncio.run(personality.render(req))
+    assert first.ok is True
+
+    # Second call's prompt should now carry a hint to avoid the first style.
+    captured_prompt = {}
+    original_build = personality._build_user_prompt
+
+    def spy_build(request, recent_styles):
+        captured_prompt["styles"] = recent_styles
+        return original_build(request, recent_styles)
+
+    monkeypatch.setattr(personality, "_build_user_prompt", spy_build)
+    second = asyncio.run(personality.render(req))
+    assert second.ok is True
+    assert "predator_consumption" in captured_prompt["styles"]

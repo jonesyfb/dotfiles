@@ -39,6 +39,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 
+import memory
 from config import (
     AMBIENT_RENDER_DEADLINE_SECONDS, PERSONALITY_RENDER_MAX_RETRIES,
     PERSONALITY_SYSTEM_PROMPT,
@@ -52,6 +53,20 @@ log = logging.getLogger("huginn.personality")
 # system prompt asks the model not to produce — checked mechanically
 # because a system prompt is a strong steer, not a guarantee.
 _THEATRICAL_MARKERS = ("*", "[", "]")
+
+# Stylistic fingerprints only — categories, never message content — fed
+# back into the next prompt so the renderer can nudge itself away from
+# repeating the same metaphor family back-to-back. See memory.log_style /
+# memory.recent_styles.
+_STYLE_CATEGORIES = {
+    "predator_consumption": ("lion", "pride", "cub", "hunt", "prey", "eat", "feast", "hoard", "den", "roar", "claw", "mouth", "devour"),
+    "weather_omen": ("storm", "omen", "sky", "thunder", "cloud", "wind", "weather", "portent"),
+    "machinery_noise": ("gear", "engine", "hum", "grind", "clank", "machine", "noise", "buzz", "whirr", "static"),
+    "territory_navigation": ("realm", "territory", "map", "border", "path", "route", "navigate", "compass", "shore"),
+    "messages_bureaucracy": ("inbox", "mail", "form", "queue", "paperwork", "ledger", "office", "memo", "clerk"),
+    "sleep_memory_ritual": ("sleep", "dream", "ritual", "rest", "wake", "vigil", "remember", "forget", "muninn"),
+    "mischief_rivalry": ("mischief", "trick", "rival", "sneak", "prank", "gossip"),
+}
 
 
 @dataclass(frozen=True)
@@ -96,7 +111,17 @@ def _compose_deterministic(request: PersonalityRequest) -> str:
     return sentence
 
 
-def _build_user_prompt(request: PersonalityRequest) -> str:
+def _classify_style(flavor: str) -> str:
+    if not flavor.strip():
+        return "silent"
+    low = flavor.lower()
+    for category, words in _STYLE_CATEGORIES.items():
+        if any(w in low for w in words):
+            return category
+    return "plain"
+
+
+def _build_user_prompt(request: PersonalityRequest, recent_styles: tuple[str, ...] = ()) -> str:
     lines = [f"Event type: {request.purpose}", f"Severity: {request.severity}"]
     if request.interruption_reason:
         lines.append(f"Why this is being said now (already decided, do not re-justify it): {request.interruption_reason}")
@@ -113,6 +138,11 @@ def _build_user_prompt(request: PersonalityRequest) -> str:
         )
     if request.prohibited_additions:
         lines.append("Do not add any of: " + ", ".join(request.prohibited_additions))
+    if recent_styles:
+        lines.append(
+            "Your last few lines leaned on these styles: " + ", ".join(recent_styles) +
+            ". Vary your approach this time if you reasonably can."
+        )
     lines.append(f"Current interaction mode: {request.interaction_mode} (a tone hint only)")
     lines.append(f"Maximum length: {request.max_length} characters.")
     lines.append(
@@ -160,7 +190,8 @@ async def render(
     protected_literal_values = tuple(
         str(request.facts[k]) for k in request.protected_keys if k in request.facts
     )
-    base_prompt = _build_user_prompt(request)
+    recent_styles = tuple(memory.recent_styles(request.purpose, limit=3))
+    base_prompt = _build_user_prompt(request, recent_styles)
 
     for attempt in range(PERSONALITY_RENDER_MAX_RETRIES + 1):
         prompt = base_prompt
@@ -194,6 +225,7 @@ async def render(
                 "personality render ok: purpose=%s severity=%s attempt=%d flavor_chars=%d",
                 request.purpose, request.severity, attempt, len(flavor),
             )
+            memory.log_style(request.purpose, _classify_style(flavor))
             text = f"{flavor} {deterministic}".strip() if flavor else deterministic
             return RenderResult(True, text, flavor, deterministic, "rendered", request.action_metadata)
         log.info(

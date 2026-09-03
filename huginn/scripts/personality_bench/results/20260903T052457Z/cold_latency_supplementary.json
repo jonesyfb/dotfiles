@@ -1,0 +1,31 @@
+{
+  "ps_before_cold_call": {
+    "models": []
+  },
+  "elapsed_s": 1.9442079049986205,
+  "ok": true,
+  "text": "Brave is eating up RAM like a lion defending its pride while those thirty-eight cubs stay open.",
+  "ps_after_cold_call": {
+    "models": [
+      {
+        "name": "qwen3.5:4b",
+        "model": "qwen3.5:4b",
+        "size": 3341958511,
+        "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "4.7B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-03T00:31:25.142276793-05:00",
+        "size_vram": 3341958511,
+        "context_length": 8192
+      }
+    ]
+  }
+}

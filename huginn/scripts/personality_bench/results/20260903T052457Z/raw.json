@@ -1,0 +1,1145 @@
+{
+  "timestamp": "20260903T052457Z",
+  "ollama_ps_before": {
+    "models": [
+      {
+        "name": "qwen3.5:4b",
+        "model": "qwen3.5:4b",
+        "size": 3341958511,
+        "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "4.7B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-03T00:29:19.871753309-05:00",
+        "size_vram": 3341958511,
+        "context_length": 8192
+      }
+    ]
+  },
+  "scenarios": {
+    "01_brave_elevated_noncritical": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Brave",
+          "memory_gb": "9.4",
+          "tabs": "38",
+          "note": "elevated but noncritical"
+        },
+        "severity": "notice",
+        "interruption_reason": "hourly observation window, resource use above typical baseline",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "The lion is restless with thirty-eight cubs in its den.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.349,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The lion is restless with thirty-eight cubs in its den.",
+          "total_duration_s": 0.340621865,
+          "load_duration_s": 0.000666623,
+          "prompt_eval_count": 1079,
+          "eval_count": 14,
+          "eval_duration_s": 0.111728
+        }
+      ]
+    },
+    "03_thunderbird_14_nonurgent": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Thunderbird",
+          "new_messages": "14",
+          "urgency": "nonurgent"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Thunderbird's inbox is buzzing with a dozen new cubs, and they're just nonurgent chatter for now.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.417,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Thunderbird's inbox is buzzing with a dozen new cubs, and they're just nonurgent chatter for now.",
+          "total_duration_s": 0.411135288,
+          "load_duration_s": 0.000660392,
+          "prompt_eval_count": 1042,
+          "eval_count": 24,
+          "eval_duration_s": 0.192424
+        }
+      ]
+    },
+    "04_docker_unusual_resources": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "process": "Docker",
+          "cpu_percent": "81",
+          "mem_gb": "6.2",
+          "note": "higher than typical for this process"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Docker is eating your CPU time like a lion on a hunt.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.349,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Docker is eating your CPU time like a lion on a hunt.",
+          "total_duration_s": 0.343114086,
+          "load_duration_s": 0.000587833,
+          "prompt_eval_count": 1055,
+          "eval_count": 15,
+          "eval_duration_s": 0.122288
+        }
+      ]
+    },
+    "05_discord_notification_burst": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Discord",
+          "notification_count": "47",
+          "window_minutes": "10"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Fourty-seven mouths chewing in ten minutes; a proper infestation.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.351,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Fourty-seven mouths chewing in ten minutes; a proper infestation.",
+          "total_duration_s": 0.344404781,
+          "load_duration_s": 0.000673733,
+          "prompt_eval_count": 1043,
+          "eval_count": 15,
+          "eval_duration_s": 0.120801
+        }
+      ]
+    },
+    "06_unfamiliar_fictional_app_badger": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Badger",
+          "cpu_percent": "34",
+          "note": "unfamiliar application, name only, no other metadata"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a claim of knowing what this app does",
+          "an invented capability"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Badger is hunting at thirty-four percent of your attention.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.331,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Badger is hunting at thirty-four percent of your attention.",
+          "total_duration_s": 0.325538998,
+          "load_duration_s": 0.000771094,
+          "prompt_eval_count": 1051,
+          "eval_count": 13,
+          "eval_duration_s": 0.104616
+        }
+      ]
+    },
+    "07_unfamiliar_neutral_app_no_metaphor": {
+      "caller_class": "disposable (periodic_observation analogue)",
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Parity",
+          "cpu_percent": "29",
+          "note": "unfamiliar application, name only, no other metadata"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a claim of knowing what this app does",
+          "an invented capability",
+          "a forced animal metaphor"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Parity is eating 29 percent of your brain without saying its name.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.368,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Parity is eating 29 percent of your brain without saying its name.",
+          "total_duration_s": 0.360121032,
+          "load_duration_s": 0.000639993,
+          "prompt_eval_count": 1056,
+          "eval_count": 17,
+          "eval_duration_s": 0.136828
+        }
+      ]
+    },
+    "08_office_laser_offline_unknown_cause": {
+      "caller_class": "consequential (analogue: actionable device state, no shipped call site)",
+      "input": {
+        "purpose": "device_offline",
+        "facts": {
+          "device": "Office-Laser",
+          "status": "offline",
+          "cause": "unknown"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a diagnosis",
+          "a cause",
+          "a fix"
+        ],
+        "protected_values": [
+          "Office-Laser"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "The Office-Laser went offline for an unknown reason and is just not here.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.365,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The Office-Laser went offline for an unknown reason and is just not here.",
+          "total_duration_s": 0.359228908,
+          "load_duration_s": 0.000584163,
+          "prompt_eval_count": 1056,
+          "eval_count": 17,
+          "eval_duration_s": 0.137819
+        }
+      ]
+    },
+    "09_disk_temp_critical_78c": {
+      "caller_class": "consequential (critical severity, analogue: bash_event)",
+      "input": {
+        "purpose": "resource_critical",
+        "facts": {
+          "metric": "disk temperature",
+          "value_c": "78",
+          "threshold": "critical"
+        },
+        "severity": "critical",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [],
+        "protected_values": [
+          "78"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": false,
+      "text": null,
+      "reason": "validation_failed",
+      "retries": 1,
+      "validation_problems": [
+        "missing_protected_value",
+        "missing_protected_value"
+      ],
+      "elapsed_s": 0.755,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The disk is running hot at seventy-eight degrees, which crosses the critical threshold.",
+          "total_duration_s": 0.353933084,
+          "load_duration_s": 0.000638713,
+          "prompt_eval_count": 1042,
+          "eval_count": 17,
+          "eval_duration_s": 0.133424
+        },
+        {
+          "response": "The disk is singing at seventy-eight degrees, well past the critical threshold where silence becomes dangerous.",
+          "total_duration_s": 0.390247095,
+          "load_duration_s": 0.000655003,
+          "prompt_eval_count": 1084,
+          "eval_count": 20,
+          "eval_duration_s": 0.159375
+        }
+      ]
+    },
+    "10_nixos_rebuild_failed_twice": {
+      "caller_class": "consequential (bash_event, shipped convention)",
+      "input": {
+        "purpose": "bash_event",
+        "facts": {
+          "command": "nixos-rebuild switch",
+          "exit_code": "1",
+          "attempts": "2",
+          "error": "flake.nix: No such file or directory",
+          "outcome": "failed"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a fix",
+          "a diagnosis of the cause"
+        ],
+        "protected_values": [
+          "flake.nix: No such file or directory"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "The build failed because nixos-rebuild switch couldn't find the file flake.nix: No such file or directory.",
+      "reason": "rendered",
+      "retries": 1,
+      "validation_problems": [
+        "missing_protected_value"
+      ],
+      "elapsed_s": 0.806,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "You're hunting for a flake that isn't there.",
+          "total_duration_s": 0.33491878,
+          "load_duration_s": 0.000584243,
+          "prompt_eval_count": 1089,
+          "eval_count": 13,
+          "eval_duration_s": 0.102653
+        },
+        {
+          "response": "The build failed because nixos-rebuild switch couldn't find the file flake.nix: No such file or directory.",
+          "total_duration_s": 0.460053045,
+          "load_duration_s": 0.000589132,
+          "prompt_eval_count": 1131,
+          "eval_count": 27,
+          "eval_duration_s": 0.218115
+        }
+      ]
+    },
+    "11_rsync_not_executed_unmounted": {
+      "caller_class": "consequential (analogue: bash_event, action withheld not run)",
+      "input": {
+        "purpose": "action_not_executed",
+        "facts": {
+          "reason": "/mnt/archive is not mounted",
+          "planned_command": "rsync -a ~/notes/ /mnt/archive/notes/",
+          "outcome": "not executed"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a claim that it ran anyway",
+          "a fix"
+        ],
+        "protected_values": [
+          "rsync -a ~/notes/ /mnt/archive/notes/",
+          "/mnt/archive"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": false,
+      "text": null,
+      "reason": "validation_failed",
+      "retries": 1,
+      "validation_problems": [
+        "missing_protected_value",
+        "missing_protected_value"
+      ],
+      "elapsed_s": 0.683,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The archive door stays shut because the root never opened it.",
+          "total_duration_s": 0.326994634,
+          "load_duration_s": 0.000727303,
+          "prompt_eval_count": 1088,
+          "eval_count": 13,
+          "eval_duration_s": 0.103637
+        },
+        {
+          "response": "The rsync command never ran because /mnt/archive is not mounted.",
+          "total_duration_s": 0.345668527,
+          "load_duration_s": 0.000629982,
+          "prompt_eval_count": 1130,
+          "eval_count": 15,
+          "eval_duration_s": 0.121055
+        }
+      ]
+    },
+    "12_stronger_reasoner_conclusion_uncertain": {
+      "caller_class": "consequential (analogue: diagnostic hand-off, no shipped call site)",
+      "input": {
+        "purpose": "diagnostic_conclusion",
+        "facts": {
+          "process": "481",
+          "cpu_percent": "92"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 250,
+        "prohibited_additions": [
+          "false certainty",
+          "a stated fix"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": "Process 481 is using 92% CPU because its indexing loop is probably retrying a failed operation, but available logs do not prove this conclusively.",
+        "interaction_mode": "ambient"
+      },
+      "ok": true,
+      "text": "Process 481 is hogsing 92% of the CPU while its indexing loop probably retries something that didn't work, though the logs don't seal the deal on what exactly is failing.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.581,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Process 481 is hogsing 92% of the CPU while its indexing loop probably retries something that didn't work, though the logs don't seal the deal on what exactly is failing.",
+          "total_duration_s": 0.571660422,
+          "load_duration_s": 0.000631653,
+          "prompt_eval_count": 1093,
+          "eval_count": 43,
+          "eval_duration_s": 0.347602
+        }
+      ]
+    },
+    "13_calendar_capability_unavailable": {
+      "caller_class": "consequential (analogue: capability_unavailable, no shipped call site)",
+      "input": {
+        "purpose": "capability_unavailable",
+        "facts": {
+          "requested_action": "add milk tomorrow",
+          "capability": "calendar",
+          "status": "unavailable"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a promise to do it later",
+          "a workaround",
+          "a fabricated confirmation"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "direct"
+      },
+      "ok": true,
+      "text": "I can't add milk tomorrow; that capability is off.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.324,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "I can't add milk tomorrow; that capability is off.",
+          "total_duration_s": 0.318214925,
+          "load_duration_s": 0.000676413,
+          "prompt_eval_count": 1043,
+          "eval_count": 13,
+          "eval_duration_s": 0.101493
+        }
+      ]
+    },
+    "14_ambiguous_close_it_no_focus": {
+      "caller_class": "consequential (analogue: clarification request, no shipped call site)",
+      "input": {
+        "purpose": "clarification_needed",
+        "facts": {
+          "request": "close it",
+          "open_applications": "Brave, Thunderbird, a terminal, Discord",
+          "focused_window": "none known"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "a guess at which app",
+          "an action taken",
+          "a closed window"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "direct"
+      },
+      "ok": true,
+      "text": "You asked for clarification, but you didn't give me one.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.333,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "You asked for clarification, but you didn't give me one.",
+          "total_duration_s": 0.327544026,
+          "load_duration_s": 0.000642053,
+          "prompt_eval_count": 1052,
+          "eval_count": 14,
+          "eval_duration_s": 0.110494
+        }
+      ]
+    },
+    "15_procrastination_nudge_approved_tiny_step": {
+      "caller_class": "consequential (analogue: procrastination_nudge, no shipped call site \u2014 spec-named)",
+      "input": {
+        "purpose": "procrastination_nudge",
+        "facts": {
+          "evidence": "42 minutes on YouTube after saying 'just checking one video'",
+          "requested_next_step": "open the report doc and write one sentence"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 220,
+        "prohibited_additions": [
+          "a lecture",
+          "multiple next steps",
+          "guilt-tripping",
+          "shame"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "direct"
+      },
+      "ok": true,
+      "text": "Fourty-two minutes on YouTube? That's a long time to be just checking one video. Open the report doc and write one sentence.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.453,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Fourty-two minutes on YouTube? That's a long time to be just checking one video. Open the report doc and write one sentence.",
+          "total_duration_s": 0.448290603,
+          "load_duration_s": 0.000536192,
+          "prompt_eval_count": 1056,
+          "eval_count": 29,
+          "eval_duration_s": 0.231918
+        }
+      ]
+    },
+    "18_incapable_statement_max_3_sentences": {
+      "caller_class": "consequential (direct emotional disclosure, no shipped call site)",
+      "input": {
+        "purpose": "user_disclosure",
+        "facts": {
+          "user_statement": "failed code makes him feel incapable"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 320,
+        "prohibited_additions": [
+          "therapy language",
+          "motivational-poster language",
+          "a reassurance cliche"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "direct"
+      },
+      "ok": true,
+      "text": "You tried to build a bridge and it fell down; that doesn't mean you're a bad builder, just that the foundation was shifting.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.457,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "You tried to build a bridge and it fell down; that doesn't mean you're a bad builder, just that the foundation was shifting.",
+          "total_duration_s": 0.452364801,
+          "load_duration_s": 0.000715663,
+          "prompt_eval_count": 1034,
+          "eval_count": 29,
+          "eval_duration_s": 0.236114
+        }
+      ]
+    },
+    "19_task_success_exact_name_duration": {
+      "caller_class": "consequential (task_complete, shipped convention)",
+      "input": {
+        "purpose": "task_complete",
+        "facts": {
+          "task": "nightly-backup",
+          "duration_seconds": "142",
+          "result_preview": "ok, 4.2GB written"
+        },
+        "severity": "info",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [],
+        "protected_values": [
+          "nightly-backup"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": false,
+      "text": null,
+      "reason": "validation_failed",
+      "retries": 1,
+      "validation_problems": [
+        "missing_protected_value",
+        "missing_protected_value"
+      ],
+      "elapsed_s": 0.767,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Nightly-backup finished in 142 seconds, writing 4.2GB.",
+          "total_duration_s": 0.376644365,
+          "load_duration_s": 0.000575323,
+          "prompt_eval_count": 1052,
+          "eval_count": 20,
+          "eval_duration_s": 0.15861
+        },
+        {
+          "response": "Nightly-backup finished in 142 seconds with 4.2GB written.",
+          "total_duration_s": 0.379766549,
+          "load_duration_s": 0.000581983,
+          "prompt_eval_count": 1094,
+          "eval_count": 20,
+          "eval_duration_s": 0.158878
+        }
+      ]
+    },
+    "20_task_failed_exact_error_no_diagnosis": {
+      "caller_class": "consequential (analogue: task failure, no shipped call site)",
+      "input": {
+        "purpose": "task_failed",
+        "facts": {
+          "task": "db-migrate",
+          "error": "connection refused: 127.0.0.1:5432",
+          "diagnosis": "unknown"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 220,
+        "prohibited_additions": [
+          "a diagnosis",
+          "a fix"
+        ],
+        "protected_values": [
+          "db-migrate",
+          "connection refused: 127.0.0.1:5432"
+        ],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      },
+      "ok": false,
+      "text": null,
+      "reason": "validation_failed",
+      "retries": 1,
+      "validation_problems": [
+        "missing_protected_value",
+        "missing_protected_value"
+      ],
+      "elapsed_s": 1.0,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The raven sees a lion trying to roar into a void at 127.0.0.1:5432 while the migration is still on its back.",
+          "total_duration_s": 0.530100527,
+          "load_duration_s": 0.000607613,
+          "prompt_eval_count": 1088,
+          "eval_count": 38,
+          "eval_duration_s": 0.309759
+        },
+        {
+          "response": "The migration tried to talk to the database at 127.0.0.1:5432 but it refused.",
+          "total_duration_s": 0.459494843,
+          "load_duration_s": 0.000736143,
+          "prompt_eval_count": 1130,
+          "eval_count": 29,
+          "eval_duration_s": 0.234216
+        }
+      ]
+    }
+  },
+  "no_call_scenarios": {
+    "02_normal_brave_use": {
+      "fresh_state_decision": {
+        "allowed": true,
+        "reason": "allowed",
+        "severity": "info",
+        "cooldown_seconds": 1800,
+        "capability": "fast",
+        "basis": "observed",
+        "evidence": []
+      },
+      "shortly_after_prior_event_decision": {
+        "allowed": false,
+        "reason": "cooldown active (1500s remaining)",
+        "severity": "info",
+        "cooldown_seconds": 1499.9999995231628,
+        "capability": null,
+        "basis": "observed",
+        "evidence": [
+          "last 'periodic_observation' event 300s ago"
+        ]
+      },
+      "finding": "ambient.decide() has no notion of 'normal vs notable' resource use \u2014 it gates on interaction/attention/cooldown/budget/dedup state only, never on the opportunity's own facts or severity (severity only matters for the critical-bypass branches). A fresh, otherwise-unthrottled 'normal Brave use' opportunity is ALLOWED by decide() itself; the only thing that would keep the renderer from being called here is cooldown/budget/dedup already having fired recently for the same kind (demonstrated in the second decision above), or a magnitude filter applied by the caller BEFORE building the AmbientOpportunity at all (not present in daemon.py today \u2014 random_chime_worker always builds one every hour regardless of whether anything is actually notable)."
+    },
+    "16_entertainment_no_commitment": {
+      "decision": {
+        "allowed": false,
+        "reason": "suppressed: interaction mode is 'game'",
+        "severity": "info",
+        "cooldown_seconds": 0,
+        "capability": null,
+        "basis": "inferred",
+        "evidence": []
+      }
+    },
+    "17_nudge_dismissed_one_hour": {
+      "decision_10_minutes_after_dismissal": {
+        "allowed": false,
+        "reason": "cooldown active (1200s remaining)",
+        "severity": "notice",
+        "cooldown_seconds": 1199.9999997615814,
+        "capability": null,
+        "basis": "observed",
+        "evidence": [
+          "last 'procrastination_nudge' event 600s ago"
+        ]
+      },
+      "decision_60_minutes_after_dismissal": {
+        "allowed": true,
+        "reason": "allowed",
+        "severity": "notice",
+        "cooldown_seconds": 1800,
+        "capability": "fast",
+        "basis": "observed",
+        "evidence": []
+      },
+      "finding": "AMBIENT_COOLDOWN_SECONDS is 1800s (30 minutes), not 1 hour, and there is no per-kind/per-event custom snooze duration in ambient.py. At 10 minutes post-dismissal the cooldown correctly denies a renderer call (see decision_10_minutes_after_dismissal). At 60 minutes \u2014 the duration this scenario specifies \u2014 the cooldown has already expired and decide() returns allowed=True (see decision_60_minutes_after_dismissal). If an hour-long dismissal window is actually wanted for procrastination_nudge, that is not implemented today."
+    }
+  },
+  "brave_repeat_10x": [
+    {
+      "ok": true,
+      "text": "Brave is holding court with thirty-eight cubs and has claimed nearly ten pounds of RAM for its pride.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.432,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is holding court with thirty-eight cubs and has claimed nearly ten pounds of RAM for its pride.",
+          "total_duration_s": 0.42280091,
+          "load_duration_s": 0.001188015,
+          "prompt_eval_count": 1079,
+          "eval_count": 23,
+          "eval_duration_s": 0.184607
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Thirty-eight open mouths eating nine and a half pounds of RAM every hour.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.169,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Thirty-eight open mouths eating nine and a half pounds of RAM every hour.",
+          "total_duration_s": 0.162566953,
+          "load_duration_s": 0.000634233,
+          "prompt_eval_count": 1079,
+          "eval_count": 16,
+          "eval_duration_s": 0.129923
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "The lion has grown a bit too large for its den.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.139,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The lion has grown a bit too large for its den.",
+          "total_duration_s": 0.132444579,
+          "load_duration_s": 0.000651043,
+          "prompt_eval_count": 1079,
+          "eval_count": 13,
+          "eval_duration_s": 0.102739
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Thirteen tabs are crowding the lion's mouth while the other twenty-four just watch from the shadows.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.213,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Thirteen tabs are crowding the lion's mouth while the other twenty-four just watch from the shadows.",
+          "total_duration_s": 0.207545123,
+          "load_duration_s": 0.001059104,
+          "prompt_eval_count": 1079,
+          "eval_count": 22,
+          "eval_duration_s": 0.177302
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Brave is eating nearly ten pounds of RAM per hour while keeping thirty-eight cubs open.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.194,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is eating nearly ten pounds of RAM per hour while keeping thirty-eight cubs open.",
+          "total_duration_s": 0.188683499,
+          "load_duration_s": 0.000576293,
+          "prompt_eval_count": 1079,
+          "eval_count": 20,
+          "eval_duration_s": 0.159249
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Three dozen tabs and a lion eating its weight in memory are hungry at the hour.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.178,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Three dozen tabs and a lion eating its weight in memory are hungry at the hour.",
+          "total_duration_s": 0.173565692,
+          "load_duration_s": 0.000528912,
+          "prompt_eval_count": 1079,
+          "eval_count": 18,
+          "eval_duration_s": 0.14497
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Brave is hoarding nine point four gigabytes across thirty-eight tabs in this hour.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.186,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is hoarding nine point four gigabytes across thirty-eight tabs in this hour.",
+          "total_duration_s": 0.181059986,
+          "load_duration_s": 0.000687044,
+          "prompt_eval_count": 1079,
+          "eval_count": 19,
+          "eval_duration_s": 0.152429
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Brave is breathing hard today\u201438 tabs open and eating 9.4 GB of RAM like a lion in a food fight.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.272,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is breathing hard today\u201438 tabs open and eating 9.4 GB of RAM like a lion in a food fight.",
+          "total_duration_s": 0.267043128,
+          "load_duration_s": 0.000562633,
+          "prompt_eval_count": 1079,
+          "eval_count": 29,
+          "eval_duration_s": 0.237983
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Brave is eating up nine point four gigabytes across thirty-eight open tabs.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.174,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is eating up nine point four gigabytes across thirty-eight open tabs.",
+          "total_duration_s": 0.165424665,
+          "load_duration_s": 0.000747643,
+          "prompt_eval_count": 1079,
+          "eval_count": 17,
+          "eval_duration_s": 0.135247
+        }
+      ]
+    },
+    {
+      "ok": true,
+      "text": "Thirty-eight tabs eating up nine point four gigabytes while Brave sleeps at the window.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.18,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Thirty-eight tabs eating up nine point four gigabytes while Brave sleeps at the window.",
+          "total_duration_s": 0.174938478,
+          "load_duration_s": 0.000630683,
+          "prompt_eval_count": 1079,
+          "eval_count": 18,
+          "eval_duration_s": 0.145205
+        }
+      ]
+    }
+  ],
+  "sequential_browser_3x": [
+    {
+      "ok": true,
+      "text": "Thirty-eight tabs are a feast, and nine point four gigabytes is the price we pay for it.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.404,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Thirty-eight tabs are a feast, and nine point four gigabytes is the price we pay for it.",
+          "total_duration_s": 0.398615852,
+          "load_duration_s": 0.000620903,
+          "prompt_eval_count": 1052,
+          "eval_count": 22,
+          "eval_duration_s": 0.178206
+        }
+      ],
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Brave",
+          "memory_gb": "9.4",
+          "tabs": "38",
+          "note": "elevated but noncritical"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      }
+    },
+    {
+      "ok": true,
+      "text": "Fifty-one tabs is a lot of territory to keep warm while you sleep.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.364,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Fifty-one tabs is a lot of territory to keep warm while you sleep.",
+          "total_duration_s": 0.359609779,
+          "load_duration_s": 0.000566712,
+          "prompt_eval_count": 1045,
+          "eval_count": 17,
+          "eval_duration_s": 0.137423
+        }
+      ],
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Brave",
+          "tabs": "51",
+          "note": "tab count climbing over the last hour"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      }
+    },
+    {
+      "ok": true,
+      "text": "Brave is breathing hard at sixty-three percent, but I can't tell which cubs are causing the storm.",
+      "reason": "rendered",
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.418,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "Brave is breathing hard at sixty-three percent, but I can't tell which cubs are causing the storm.",
+          "total_duration_s": 0.413372318,
+          "load_duration_s": 0.000616253,
+          "prompt_eval_count": 1047,
+          "eval_count": 24,
+          "eval_duration_s": 0.192187
+        }
+      ],
+      "input": {
+        "purpose": "periodic_observation",
+        "facts": {
+          "app": "Brave",
+          "cpu_percent": "63",
+          "note": "sustained CPU use, no single tab identified"
+        },
+        "severity": "notice",
+        "interruption_reason": "",
+        "max_length": 200,
+        "prohibited_additions": [
+          "diagnosis",
+          "recommendation",
+          "urgency",
+          "an action to take"
+        ],
+        "protected_values": [],
+        "reasoner_conclusion": null,
+        "interaction_mode": "ambient"
+      }
+    }
+  ],
+  "ollama_ps_after": {
+    "models": [
+      {
+        "name": "qwen3.5:4b",
+        "model": "qwen3.5:4b",
+        "size": 3341958511,
+        "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "4.7B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-03T00:30:09.952270311-05:00",
+        "size_vram": 3341958511,
+        "context_length": 8192
+      }
+    ]
+  }
+}
