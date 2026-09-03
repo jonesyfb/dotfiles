@@ -341,7 +341,14 @@ async def unload_model(model: str) -> None:
 
 async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
     """Raw primitive — no lock, no coordinator routing, no cloud path
-    anywhere in this function. Use render_personality_only() instead."""
+    anywhere in this function. Use render_personality_only() instead.
+
+    think=False is load-bearing, not cosmetic: measured live, qwen3.5:4b
+    spent ~44s and 5276 tokens of hidden reasoning to produce a 15-word
+    answer with thinking left on (matching Garage Watch's own qwen3.5 usage,
+    which already disables it for the same reason). With it off: ~0.3s,
+    24 tokens, same voice quality. This is the difference between a snappy
+    ambient renderer and one that blows the deadline on every single call."""
     payload = {
         "model": MODELS["personality"]["model"],
         "messages": [
@@ -349,6 +356,7 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
             {"role": "user", "content": user_prompt},
         ],
         "stream": False,
+        "think": False,
         "options": {"temperature": 0.7},
     }
     async with httpx.AsyncClient(timeout=PERSONALITY_RENDER_TIMEOUT_SECONDS) as client:

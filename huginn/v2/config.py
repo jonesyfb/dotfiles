@@ -64,18 +64,19 @@ AMBIENT_DEDUP_WINDOW     = 21600    # don't repeat near-identical text within th
 
 # ── Personality renderer ──────────────────────────────────────────────────────
 # Coordinator-level deadline (queue wait + run, combined) for a qwen3.5:4b
-# rendering call. REASONED INTERIM DEFAULT, not yet measured live on this
-# desktop through the real coordinator — this session's Ollama access has
-# been unavailable (a game was using the GPU) for the window this slice was
-# built in. Basis: earlier same-session direct measurements of qwen3.5:4b —
-# cold load ~2.2s, and a (much longer than an ambient one-liner needs) 1034-
-# token warm generation at ~92 tok/s. An ambient render targets a single
-# short sentence (tens of tokens, not hundreds), so cold-worst-case should
-# comfortably clear a few seconds of generation on top of that load time.
-# TODO(live verification): once the GPU is free, measure real p95 through
-# v2/coordinator.py exactly as gatekeeper's deadline was measured, and
-# adjust this constant from observed data rather than this estimate.
-AMBIENT_RENDER_DEADLINE_SECONDS = 15
+# rendering call. MEASURED live through the real coordinator once Ollama
+# access returned. First measurement (6 trials, real PERSONALITY_SYSTEM_PROMPT,
+# realistic facts) came back at 28-115s per call — Ollama's chat API defaults
+# reasoning-capable qwen3.5 models to "thinking" mode, and qwen3.5:4b was
+# burning ~5000 tokens of hidden reasoning per call (measured directly:
+# eval_count=5276) to produce a 15-word answer. Fixed by passing `think:
+# False` in llm._render_personality_raw (same fix Garage Watch already
+# applies to its own qwen3.5 usage, for the same reason). Re-measured after
+# the fix, 6 varied realistic scenarios, all warm: 0.31-0.45s, p50 0.36s.
+# Cold load separately measured at ~2.2-3.5s. This deadline covers a cold
+# load plus generation, twice over (one retry), with real margin — not a
+# guess.
+AMBIENT_RENDER_DEADLINE_SECONDS = 8
 
 # httpx-level backstop inside llm._render_personality_raw, same role as
 # GATE_JUDGE_TIMEOUT_SECONDS for the gatekeeper: a generous outer ceiling in
