@@ -10,6 +10,7 @@ import asyncio
 import ambient
 import context
 import daemon
+import memory
 import personality
 from coordinator import Purpose
 from personality import RenderResult
@@ -28,6 +29,19 @@ def test_parse_stats_splits_key_value_lines():
 def test_parse_stats_ignores_lines_without_colon():
     facts = daemon._parse_stats("CPU:2%\nnot a kv line\nMEM:1Gi")
     assert facts == {"CPU": "2%", "MEM": "1Gi"}
+
+
+def test_numeric_facts_extracts_leading_numbers():
+    facts = {"CPU": "2%", "MEM": "6.7Gi/30Gi", "UPTIME": "up 2 hours"}
+    numeric = daemon._numeric_facts(facts)
+    assert numeric["CPU"] == 2.0
+    assert numeric["MEM"] == 6.7
+    assert numeric["UPTIME"] == 2.0
+
+
+def test_numeric_facts_skips_non_numeric_values():
+    facts = {"STATUS": "no data available"}
+    assert daemon._numeric_facts(facts) == {}
 
 
 # ── _notify_task_complete ──────────────────────────────────────────────────────
@@ -187,13 +201,15 @@ async def _spin_worker_briefly():
         pass
 
 
-def test_random_chime_worker_never_renders_when_policy_denies(monkeypatch):
+def test_random_chime_worker_never_renders_when_policy_denies(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(daemon.asyncio, "sleep", _instant_sleep)
 
     async def fake_collect():
         return object()  # never inspected further since decide() is mocked
 
     monkeypatch.setattr(context, "collect", fake_collect)
+    monkeypatch.setattr(daemon, "_run_stats", lambda: _async_return("CPU:2%\nMEM:1Gi"))
 
     def deny(*a, **kw):
         return ambient.AmbientDecision(False, "cooldown active", "info", 0, None, "observed")
@@ -213,7 +229,8 @@ def test_random_chime_worker_never_renders_when_policy_denies(monkeypatch):
     assert render_calls["n"] == 0
 
 
-def test_random_chime_worker_renders_with_ambient_purpose_when_policy_allows(monkeypatch):
+def test_random_chime_worker_renders_with_ambient_purpose_when_policy_allows(tmp_path, monkeypatch):
+    monkeypatch.setattr(memory, "DB_PATH", tmp_path / "test.db")
     monkeypatch.setattr(daemon.asyncio, "sleep", _instant_sleep)
 
     fake_snapshot = context.RuntimeContext(

@@ -90,6 +90,20 @@ def _init(c: sqlite3.Connection) -> None:
             text TEXT NOT NULL,
             ts   INTEGER DEFAULT (unixepoch())
         );
+        CREATE TABLE IF NOT EXISTS ambient_snoozes (
+            scope      TEXT PRIMARY KEY,
+            expires_at REAL NOT NULL,
+            origin     TEXT NOT NULL DEFAULT 'manual',
+            reason     TEXT,
+            created_at INTEGER DEFAULT (unixepoch())
+        );
+        CREATE TABLE IF NOT EXISTS ambient_baselines (
+            kind   TEXT NOT NULL,
+            metric TEXT NOT NULL,
+            value  REAL NOT NULL,
+            ts     INTEGER DEFAULT (unixepoch()),
+            PRIMARY KEY (kind, metric)
+        );
     """)
     if _VEC_AVAILABLE:
         try:
@@ -344,3 +358,52 @@ def recent_ambient_events(kind: str, within_seconds: int) -> list[dict]:
             (kind, within_seconds),
         ).fetchall()
         return [dict(r) for r in rows]
+
+
+# ── Ambient snooze/dismissal state ──────────────────────────────────────────────
+# Explicit, user/manual-originated suppression — distinct from the automatic
+# cooldown above. One row per scope ("global" or "kind:<event_kind>"). Persisted
+# in the same sqlite file as everything else, so it survives a daemon restart
+# for free, same as facts/tasks/gate_verdicts already do.
+
+def set_snooze(scope: str, expires_at: float, origin: str = "manual", reason: str | None = None) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO ambient_snoozes(scope, expires_at, origin, reason) VALUES(?,?,?,?) "
+            "ON CONFLICT(scope) DO UPDATE SET expires_at=excluded.expires_at, "
+            "origin=excluded.origin, reason=excluded.reason, created_at=unixepoch()",
+            (scope, expires_at, origin, reason),
+        )
+
+
+def get_snooze(scope: str) -> dict | None:
+    with db() as c:
+        row = c.execute(
+            "SELECT scope, expires_at, origin, reason FROM ambient_snoozes WHERE scope=?",
+            (scope,),
+        ).fetchone()
+        return dict(row) if row else None
+
+
+def clear_snooze(scope: str) -> None:
+    with db() as c:
+        c.execute("DELETE FROM ambient_snoozes WHERE scope=?", (scope,))
+
+
+# ── Ambient worthiness: per-kind numeric baselines ──────────────────────────────
+
+def get_baseline(kind: str, metric: str) -> float | None:
+    with db() as c:
+        row = c.execute(
+            "SELECT value FROM ambient_baselines WHERE kind=? AND metric=?", (kind, metric)
+        ).fetchone()
+        return row["value"] if row else None
+
+
+def set_baseline(kind: str, metric: str, value: float) -> None:
+    with db() as c:
+        c.execute(
+            "INSERT INTO ambient_baselines(kind, metric, value) VALUES(?,?,?) "
+            "ON CONFLICT(kind, metric) DO UPDATE SET value=excluded.value, ts=unixepoch()",
+            (kind, metric, value),
+        )

@@ -8,6 +8,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -231,29 +232,52 @@ async def task_worker() -> None:
 
 _AMBIENT_KIND = "periodic_observation"
 
+_NUM_RE = re.compile(r"-?\d+(?:\.\d+)?")
+
+
+def _numeric_facts(facts: dict) -> dict[str, float]:
+    """Best-effort extraction of a leading numeric token from each fact
+    value (e.g. "3%" -> 3.0, "6.7Gi" -> 6.7) for baseline-deviation
+    worthiness checks. Facts with no numeric token are silently skipped —
+    this is a heuristic feed into evaluate_periodic_worthiness, not a
+    parser anything else depends on."""
+    out = {}
+    for key, value in facts.items():
+        m = _NUM_RE.search(value)
+        if m:
+            try:
+                out[key] = float(m.group())
+            except ValueError:
+                pass
+    return out
+
 
 async def random_chime_worker() -> None:
     """Hourly loop: ask the ambient policy whether Huginn may make an
     unsolicited dry observation right now. The policy — not a dice roll —
-    decides via cooldown/budget/dedup/interaction-mode/attention state; a
-    denial here cannot be overridden by anything generated below. Wording
-    comes from the narrow personality renderer (qwen3.5:4b), not a raw
-    freeform chat completion — it only ever sees the parsed stats facts,
-    never the full Runtime Context Engine snapshot or SYSTEM_PROMPT."""
+    decides via eligibility (interaction/attention/snooze), worthiness (a
+    real deviation from the last-seen stats, not just availability of
+    sensor data), and cooldown/budget/dedup; a denial here cannot be
+    overridden by anything generated below. Wording comes from the narrow
+    personality renderer (qwen3.5:4b), not a raw freeform chat completion —
+    it only ever sees the parsed stats facts, never the full Runtime
+    Context Engine snapshot or SYSTEM_PROMPT."""
     await asyncio.sleep(60)  # settle after startup
     while True:
         await asyncio.sleep(3600)
         try:
             snapshot = await context.collect()
-            opportunity = ambient.AmbientOpportunity(kind=_AMBIENT_KIND)
+            stats = await _run_stats()
+            facts = _parse_stats(stats)
+            worthiness = ambient.evaluate_periodic_worthiness(_AMBIENT_KIND, _numeric_facts(facts))
+            opportunity = ambient.AmbientOpportunity(kind=_AMBIENT_KIND, worthiness=worthiness)
             decision = ambient.decide(opportunity, snapshot)
             if not decision.allowed:
                 continue
 
-            stats = await _run_stats()
             request = personality.PersonalityRequest(
                 purpose=_AMBIENT_KIND,
-                facts=_parse_stats(stats),
+                facts=facts,
                 severity=decision.severity,
                 interruption_reason=decision.reason,
                 max_length=120,
@@ -272,7 +296,7 @@ async def random_chime_worker() -> None:
             # against it — everything else in the snapshot is unchanged
             # since the first check moments ago.
             final = ambient.decide(
-                ambient.AmbientOpportunity(kind=_AMBIENT_KIND, candidate_text=response),
+                ambient.AmbientOpportunity(kind=_AMBIENT_KIND, severity=decision.severity, worthiness=worthiness, candidate_text=response),
                 snapshot,
             )
             if not final.allowed:
