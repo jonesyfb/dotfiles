@@ -78,6 +78,12 @@ _EXECUTION_WORDS = ("ran", "executed", "completed", "went through")
 # A specific, observed, recurring model typo (not a general spellchecker) —
 # see scripts/personality_bench/results/20260903T055434Z/report.md.
 _KNOWN_MISSPELLINGS = ("fourty",)
+# Specific stock phrases observed in live runs, including one the system
+# prompt explicitly calls out as an example of vague atmospheric writing to
+# avoid — the model used it almost verbatim anyway
+# (scripts/personality_bench/results/20260903T061824Z/raw.json, scenario
+# 19_task_succeeded). Narrow, evidence-based bans, not a style classifier.
+_BANNED_STOCK_PHRASES = ("forgot how to breathe", "forgotten how to breathe", "new guest in the house")
 
 
 @dataclass(frozen=True)
@@ -392,6 +398,8 @@ def _validate_flavor(text: str, request: PersonalityRequest, protected_literal_v
     low = text.lower()
     if any(m in low for m in _KNOWN_MISSPELLINGS):
         return "known_misspelling"
+    if any(p in low for p in _BANNED_STOCK_PHRASES):
+        return "banned_stock_phrase"
     if request.max_sentences is not None:
         sentence_count = len([s for s in re.split(r"[.!?]+", text) if s.strip()])
         if sentence_count > request.max_sentences:

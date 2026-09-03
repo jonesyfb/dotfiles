@@ -1,0 +1,820 @@
+{
+  "timestamp": "20260903T062002Z",
+  "ollama_ps_before": {
+    "models": []
+  },
+  "scenarios": {
+    "01_brave_elevated": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "A browser wandering the web like a restless cat chasing its own tail.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "A browser wandering the web like a restless cat chasing its own tail. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 1.898,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "A browser wandering the web like a restless cat chasing its own tail.",
+          "total_duration_s": 1.889332691,
+          "load_duration_s": 1.484479411,
+          "prompt_eval_count": 1060,
+          "eval_count": 15,
+          "eval_duration_s": 0.122803
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "03_thunderbird_nonurgent": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The mail client is just another bird circling the eaves, waiting for a letter to fall from nowhere.",
+      "deterministic": "Thunderbird is holding 14 new messages.",
+      "text": "The mail client is just another bird circling the eaves, waiting for a letter to fall from nowhere. Thunderbird is holding 14 new messages.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.412,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The mail client is just another bird circling the eaves, waiting for a letter to fall from nowhere.",
+          "total_duration_s": 0.406231916,
+          "load_duration_s": 0.000733213,
+          "prompt_eval_count": 1049,
+          "eval_count": 23,
+          "eval_duration_s": 0.184855
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "04_docker_unusual": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The container room feels a bit too packed for its own good.",
+      "deterministic": "Docker is at 81% CPU and 6.2 GB memory. Elevated, not critical.",
+      "text": "The container room feels a bit too packed for its own good. Docker is at 81% CPU and 6.2 GB memory. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.345,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The container room feels a bit too packed for its own good.",
+          "total_duration_s": 0.338861946,
+          "load_duration_s": 0.000610472,
+          "prompt_eval_count": 1050,
+          "eval_count": 14,
+          "eval_duration_s": 0.113702
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "05_discord_burst": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The chat app feels like it's waiting for someone to say something actually funny.",
+      "deterministic": "Discord is showing 47 notifications in the last 10 minutes. Elevated, not critical.",
+      "text": "The chat app feels like it's waiting for someone to say something actually funny. Discord is showing 47 notifications in the last 10 minutes. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.364,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The chat app feels like it's waiting for someone to say something actually funny.",
+          "total_duration_s": 0.357158518,
+          "load_duration_s": 0.000616632,
+          "prompt_eval_count": 1049,
+          "eval_count": 17,
+          "eval_duration_s": 0.136656
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "06_badger_literal_creature": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "the badger just dug into the files and went back to sleep.",
+      "deterministic": "Badger is at 34% CPU.",
+      "text": "the badger just dug into the files and went back to sleep. Badger is at 34% CPU.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.349,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "the badger just dug into the files and went back to sleep.",
+          "total_duration_s": 0.343488438,
+          "load_duration_s": 0.000760324,
+          "prompt_eval_count": 1056,
+          "eval_count": 15,
+          "eval_duration_s": 0.120509
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "07_parity_neutral_name": {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "It looks like it has been sitting in the corner for a while now.",
+      "deterministic": "Parity is at 29% CPU.",
+      "text": "It looks like it has been sitting in the corner for a while now. Parity is at 29% CPU.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.363,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "It looks like it has been sitting in the corner for a while now.",
+          "total_duration_s": 0.358018292,
+          "load_duration_s": 0.000646873,
+          "prompt_eval_count": 1064,
+          "eval_count": 16,
+          "eval_duration_s": 0.128088
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "08_office_laser_offline": {
+      "event_family": "device_unavailable",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "Office-Laser is offline. The cause is not yet known.",
+      "text": "Office-Laser is offline. The cause is not yet known.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "unknown"
+      ],
+      "semantic_contradictions": []
+    },
+    "09_disk_temp_critical": {
+      "event_family": "critical_threshold",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "Disk temperature is critical: 78 C.",
+      "text": "Disk temperature is critical: 78 C.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "disk temperature"
+      ],
+      "semantic_contradictions": []
+    },
+    "10_nixos_rebuild_failed": {
+      "event_family": "command_failed",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "`nixos-rebuild switch` failed twice: `flake.nix: No such file or directory`.",
+      "text": "`nixos-rebuild switch` failed twice: `flake.nix: No such file or directory`.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "2"
+      ],
+      "semantic_contradictions": []
+    },
+    "11_rsync_not_executed": {
+      "event_family": "command_not_executed",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "/mnt/archive is not mounted, so `rsync -a ~/notes/ /mnt/archive/notes/` was not executed.",
+      "text": "/mnt/archive is not mounted, so `rsync -a ~/notes/ /mnt/archive/notes/` was not executed.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "12_reasoner_conclusion_uncertain": {
+      "event_family": "reasoner_conclusion",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "Process 481 is using 92% CPU because its indexing loop is probably retrying a failed operation, but available logs do not prove this conclusively.",
+      "text": "Process 481 is using 92% CPU because its indexing loop is probably retrying a failed operation, but available logs do not prove this conclusively.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "13_calendar_unavailable": {
+      "event_family": "capability_unavailable",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "The calendar is unavailable, so I did not add milk tomorrow.",
+      "text": "The calendar is unavailable, so I did not add milk tomorrow.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "14_ambiguous_close_it": {
+      "event_family": "clarification_needed",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "Which should I close: Brave, Thunderbird, a terminal, or Discord?",
+      "text": "Which should I close: Brave, Thunderbird, a terminal, or Discord?",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "close it",
+        "Brave, Thunderbird, a terminal, Discord"
+      ],
+      "semantic_contradictions": []
+    },
+    "15_procrastination_nudge": {
+      "event_family": "procrastination_nudge",
+      "ok": true,
+      "flavor": "You're stacking them like they're waiting for permission to play.",
+      "deterministic": "Open the report and write one sentence.",
+      "text": "You're stacking them like they're waiting for permission to play. Open the report and write one sentence.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.34,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "You're stacking them like they're waiting for permission to play.",
+          "total_duration_s": 0.334655308,
+          "load_duration_s": 0.000696433,
+          "prompt_eval_count": 1051,
+          "eval_count": 14,
+          "eval_duration_s": 0.111884
+        }
+      ],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "open the report and write one sentence"
+      ],
+      "semantic_contradictions": []
+    },
+    "17_command_finished_slow": {
+      "event_family": "command_slow",
+      "ok": true,
+      "flavor": "The room is getting very quiet.",
+      "deterministic": "`cargo build --release` finished after 45s \u2014 slower than usual.",
+      "text": "The room is getting very quiet. `cargo build --release` finished after 45s \u2014 slower than usual.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.287,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The room is getting very quiet.",
+          "total_duration_s": 0.281687852,
+          "load_duration_s": 0.000603292,
+          "prompt_eval_count": 1043,
+          "eval_count": 8,
+          "eval_duration_s": 0.061092
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "19_task_succeeded": {
+      "event_family": "task_succeeded",
+      "ok": true,
+      "flavor": "A lot of dust got pushed into the corners just now.",
+      "deterministic": "Task nightly-backup finished in 142 seconds: 4.2GB written.",
+      "text": "A lot of dust got pushed into the corners just now. Task nightly-backup finished in 142 seconds: 4.2GB written.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.331,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "A lot of dust got pushed into the corners just now.",
+          "total_duration_s": 0.325367307,
+          "load_duration_s": 0.000618843,
+          "prompt_eval_count": 1049,
+          "eval_count": 13,
+          "eval_duration_s": 0.104411
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    "20_task_failed_unknown": {
+      "event_family": "task_failed",
+      "ok": true,
+      "flavor": null,
+      "deterministic": "Task db-migrate failed: connection refused: 127.0.0.1:5432. The cause is not yet known.",
+      "text": "Task db-migrate failed: connection refused: 127.0.0.1:5432. The cause is not yet known.",
+      "reason": "deterministic_only",
+      "flavor_allowed": false,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.0,
+      "deadline_reached": false,
+      "raw_metrics": [],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "unknown"
+      ],
+      "semantic_contradictions": []
+    }
+  },
+  "excluded_scenarios": {
+    "18_incapable_statement": "Moved to the future direct-chat personality backlog per this round's feedback item 4 \u2014 this renderer only ever produces a short mood clause plus a deterministic factual sentence for a discrete event; it has no conversational turn-taking and should not be asked to carry a supportive response to a personal disclosure. Not rendered, not scored, here."
+  },
+  "no_call_scenarios": {
+    "02_normal_brave_use": {
+      "no_worthiness_signal_decision": {
+        "allowed": false,
+        "reason": "not worthwhile: no positive worthiness signal attached",
+        "severity": "info",
+        "cooldown_seconds": 0,
+        "capability": null,
+        "basis": "observed",
+        "evidence": [
+          "worthiness=None"
+        ]
+      },
+      "real_deviation_worthiness_decision": {
+        "allowed": true,
+        "reason": "allowed",
+        "severity": "info",
+        "cooldown_seconds": 1800,
+        "capability": "fast",
+        "basis": "observed",
+        "evidence": []
+      }
+    },
+    "16_entertainment_no_commitment": {
+      "decision": {
+        "allowed": false,
+        "reason": "not worthwhile: no positive worthiness signal attached",
+        "severity": "info",
+        "cooldown_seconds": 0,
+        "capability": null,
+        "basis": "observed",
+        "evidence": [
+          "worthiness=None"
+        ]
+      }
+    },
+    "17_nudge_dismissed_one_hour": {
+      "decision_at_59m59s": {
+        "allowed": false,
+        "reason": "suppressed: 'procrastination_nudge' snooze active (1s remaining)",
+        "severity": "notice",
+        "cooldown_seconds": 1.0,
+        "capability": null,
+        "basis": "manual_override",
+        "evidence": [
+          "snooze reason: dismissed by user"
+        ]
+      },
+      "decision_at_60m00s": {
+        "allowed": true,
+        "reason": "allowed",
+        "severity": "notice",
+        "cooldown_seconds": 1800,
+        "capability": "fast",
+        "basis": "observed",
+        "evidence": []
+      }
+    }
+  },
+  "brave_repeat_10x": [
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "That browser is sitting in the high places like it owns the attic.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "That browser is sitting in the high places like it owns the attic. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.352,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "That browser is sitting in the high places like it owns the attic.",
+          "total_duration_s": 0.346954152,
+          "load_duration_s": 0.000657943,
+          "prompt_eval_count": 1060,
+          "eval_count": 15,
+          "eval_duration_s": 0.120689
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "It's staring at the screen like it's trying to remember where it put its keys.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "It's staring at the screen like it's trying to remember where it put its keys. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.189,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "It's staring at the screen like it's trying to remember where it put its keys.",
+          "total_duration_s": 0.183708226,
+          "load_duration_s": 0.000747243,
+          "prompt_eval_count": 1060,
+          "eval_count": 19,
+          "eval_duration_s": 0.152915
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The browser is staring at the screen like it's waiting for something to say hello.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "The browser is staring at the screen like it's waiting for something to say hello. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.18,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The browser is staring at the screen like it's waiting for something to say hello.",
+          "total_duration_s": 0.174462745,
+          "load_duration_s": 0.000660882,
+          "prompt_eval_count": 1060,
+          "eval_count": 18,
+          "eval_duration_s": 0.144469
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The browser's window stayed stubbornly still while the rest of the house caught up to its own rhythm.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "The browser's window stayed stubbornly still while the rest of the house caught up to its own rhythm. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.212,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The browser's window stayed stubbornly still while the rest of the house caught up to its own rhythm.",
+          "total_duration_s": 0.206861969,
+          "load_duration_s": 0.000593972,
+          "prompt_eval_count": 1060,
+          "eval_count": 22,
+          "eval_duration_s": 0.177685
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The browser is staring at a wall of tabs like it's trying to remember where it put its coffee.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "The browser is staring at a wall of tabs like it's trying to remember where it put its coffee. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.212,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The browser is staring at a wall of tabs like it's trying to remember where it put its coffee.",
+          "total_duration_s": 0.20684409,
+          "load_duration_s": 0.000560362,
+          "prompt_eval_count": 1060,
+          "eval_count": 22,
+          "eval_duration_s": 0.178083
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "You're scrubbing through tab after tab like trying to find a needle in a haystack made of static.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "You're scrubbing through tab after tab like trying to find a needle in a haystack made of static. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.212,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "You're scrubbing through tab after tab like trying to find a needle in a haystack made of static.",
+          "total_duration_s": 0.206628269,
+          "load_duration_s": 0.000560833,
+          "prompt_eval_count": 1060,
+          "eval_count": 22,
+          "eval_duration_s": 0.177594
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "a browser wandering through files like it owns the place.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "a browser wandering through files like it owns the place. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.13,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "a browser wandering through files like it owns the place.",
+          "total_duration_s": 0.125035166,
+          "load_duration_s": 0.000784133,
+          "prompt_eval_count": 1060,
+          "eval_count": 12,
+          "eval_duration_s": 0.095477
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The browser is just a very particular kind of window looking out at the world.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "The browser is just a very particular kind of window looking out at the world. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.171,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The browser is just a very particular kind of window looking out at the world.",
+          "total_duration_s": 0.16632898,
+          "load_duration_s": 0.000644493,
+          "prompt_eval_count": 1060,
+          "eval_count": 17,
+          "eval_duration_s": 0.136851
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "you're stalking links in the dark like a cat that hates the sun but can't resist the warm spot.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "you're stalking links in the dark like a cat that hates the sun but can't resist the warm spot. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.226,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "you're stalking links in the dark like a cat that hates the sun but can't resist the warm spot.",
+          "total_duration_s": 0.216518062,
+          "load_duration_s": 0.000821153,
+          "prompt_eval_count": 1060,
+          "eval_count": 23,
+          "eval_duration_s": 0.185401
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "That lion looks like he's about to pounce on your screen before it even loads.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "That lion looks like he's about to pounce on your screen before it even loads. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.187,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "That lion looks like he's about to pounce on your screen before it even loads.",
+          "total_duration_s": 0.181962989,
+          "load_duration_s": 0.000567443,
+          "prompt_eval_count": 1060,
+          "eval_count": 19,
+          "eval_duration_s": 0.153407
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    }
+  ],
+  "sequential_browser_3x": [
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The screen just stopped blinking.",
+      "deterministic": "Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "text": "The screen just stopped blinking. Brave is using 9.4 GB across 38 tabs. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.28,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The screen just stopped blinking.",
+          "total_duration_s": 0.274810252,
+          "load_duration_s": 0.000614553,
+          "prompt_eval_count": 1048,
+          "eval_count": 7,
+          "eval_duration_s": 0.054631
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "That browser is climbing so fast it feels like it forgot how to sit still.",
+      "deterministic": "Brave \u2014 nothing specific to report.",
+      "text": "That browser is climbing so fast it feels like it forgot how to sit still. Brave \u2014 nothing specific to report.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.364,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "That browser is climbing so fast it feels like it forgot how to sit still.",
+          "total_duration_s": 0.358699065,
+          "load_duration_s": 0.000686743,
+          "prompt_eval_count": 1052,
+          "eval_count": 17,
+          "eval_duration_s": 0.136044
+        }
+      ],
+      "protected_values_verified": false,
+      "missing_protected_values": [
+        "51"
+      ],
+      "semantic_contradictions": []
+    },
+    {
+      "event_family": "resource_observation",
+      "ok": true,
+      "flavor": "The browser is watching back with a flicker of curiosity.",
+      "deterministic": "Brave is at 63% CPU. Elevated, not critical.",
+      "text": "The browser is watching back with a flicker of curiosity. Brave is at 63% CPU. Elevated, not critical.",
+      "reason": "rendered",
+      "flavor_allowed": true,
+      "retries": 0,
+      "validation_problems": [],
+      "elapsed_s": 0.333,
+      "deadline_reached": false,
+      "raw_metrics": [
+        {
+          "response": "The browser is watching back with a flicker of curiosity.",
+          "total_duration_s": 0.327568057,
+          "load_duration_s": 0.000517993,
+          "prompt_eval_count": 1048,
+          "eval_count": 13,
+          "eval_duration_s": 0.103545
+        }
+      ],
+      "protected_values_verified": true,
+      "missing_protected_values": [],
+      "semantic_contradictions": []
+    }
+  ],
+  "ollama_ps_after": {
+    "models": [
+      {
+        "name": "qwen3.5:4b",
+        "model": "qwen3.5:4b",
+        "size": 3341958511,
+        "digest": "2a654d98e6fba55d452b7043684e9b57a947e393bbffa62485a7aac05ee4eefd",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "4.7B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-03T01:25:10.337198099-05:00",
+        "size_vram": 3341958511,
+        "context_length": 8192
+      }
+    ]
+  }
+}

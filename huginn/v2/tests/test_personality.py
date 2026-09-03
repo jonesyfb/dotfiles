@@ -82,6 +82,12 @@ def test_validate_flavor_rejects_known_misspelling():
     assert personality._validate_flavor("Fourty minutes of scrolling.", req, ()) == "known_misspelling"
 
 
+def test_validate_flavor_rejects_banned_stock_phrase():
+    req = PersonalityRequest(purpose="x", max_length=200)
+    assert personality._validate_flavor("The room has forgotten how to breathe again.", req, ()) == "banned_stock_phrase"
+    assert personality._validate_flavor("A new guest in the house, quietly humming.", req, ()) == "banned_stock_phrase"
+
+
 def test_validate_flavor_rejects_too_many_sentences():
     req = PersonalityRequest(purpose="x", max_length=200, max_sentences=2)
     text = "One. Two. Three."
@@ -389,6 +395,29 @@ def test_prompt_instructs_no_digits_and_no_outcome_claims():
     prompt = personality._build_user_prompt(req)
     assert "no numbers" in prompt.lower() or "no digits" in prompt.lower()
     assert "succeeded" in prompt.lower() or "outcome" in prompt.lower()
+
+
+def test_prompt_contains_you_not_third_person_instruction():
+    from config import PERSONALITY_SYSTEM_PROMPT
+    lowered = PERSONALITY_SYSTEM_PROMPT.lower()
+    assert '"you"' in lowered
+    assert "third person" in lowered
+
+
+def test_prompt_contains_literal_name_and_neutral_name_guidance():
+    from config import PERSONALITY_SYSTEM_PROMPT
+    lowered = PERSONALITY_SYSTEM_PROMPT.lower()
+    assert "badger is a badger" in lowered
+    assert "don't force an" in lowered or "do not force an" in lowered
+    assert "new guest in the house" in lowered  # explicitly called out as a phrase to avoid
+
+
+def test_prompt_does_not_ask_to_vary_recent_styles():
+    """Retired per this slice's finding: penalizing category reuse pushed
+    the model toward ungrounded imagery. Consistency for one named thing
+    (Brave = lion) is correct, not a repetition bug."""
+    from config import PERSONALITY_SYSTEM_PROMPT
+    assert "vary your approach" not in PERSONALITY_SYSTEM_PROMPT.lower()
 
 
 def test_vulnerable_purpose_structural():
