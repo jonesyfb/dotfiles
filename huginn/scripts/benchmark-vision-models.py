@@ -1,167 +1,112 @@
 #!/usr/bin/env python3
 """
-Standalone benchmark for auditioning local vision-model candidates for the
-gatekeeper role — NOT wired into the daemon or the coordinator. Run this by
-hand when considering a replacement for gemma4:31b; it does not select or
-change anything on its own (HUGINN_CODEX_CLAUDE_PROMPT.md explicitly says
-not to pick a replacement in this commit).
+Controlled, repeatable audition for local vision-model gatekeeper
+candidates. Standalone — NOT wired into the daemon or v2/coordinator.py.
+Never changes gatekeeper's configured model, Ollama service environment,
+Runtime Context Engine policy, personality routing, or SYSTEM_PROMPT; it
+only measures and reports.
 
-Uses the exact same GATE_PROMPT template and screenshot files gatekeeper.py
-uses, so candidates are compared on identical inputs. For each candidate
-model, records:
-  - cold load latency (first request after an explicit unload)
-  - warm generation latency (immediate second request)
-  - memory split (total size vs size_vram, from /api/ps)
-  - verdict validity (does the response parse as {"approved": bool, "message": str}?)
-  - timeout rate over N trials at the configured deadline
+Safety:
+- Refuses to run while Huginn's game-mode flag is active (loading large
+  models would fight a running game for VRAM).
+- Warns (but does not block) if the GPU already shows significant
+  competing activity before starting.
+- Honors the same /tmp/ollama.lock cross-process contract Huginn and
+  Garage Watch use, with a bounded acquisition deadline — never blocks
+  forever, and can't silently run concurrently with either.
+- Every screenshot is synthetic (scripts/vision_bench/corpus.py) — no real
+  desktop content, so nothing sensitive can end up in results or logs.
+- All inference is local Ollama calls only; nothing here ever reaches a
+  cloud endpoint.
 
 Usage:
-  uv run --project .. python3 scripts/benchmark-vision-models.py gemma4:31b llava:13b ...
-  (with no args, benchmarks just gemma4:31b — the current model — as a baseline)
+  uv run --project .. python3 scripts/benchmark-vision-models.py gemma4:31b gemma4:e2b gemma4:e4b llava:7b
+  uv run --project .. python3 scripts/benchmark-vision-models.py --warm-trials 2 gemma4:e2b
+
+Outputs (written under scripts/vision_bench/results/<timestamp>/):
+  raw.json       — every trial's full response, timing, and parsed verdict
+  report.md      — human-readable comparison table + notes
+  corpus/*.png   — the exact synthetic screenshots used (for reproducibility)
 """
+import argparse
 import asyncio
-import json
-import re
 import sys
 import time
+from datetime import datetime, timezone
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "v2"))
+sys.path.insert(0, str(Path(__file__).resolve().parent))
 
-import httpx  # noqa: E402
-
-from config import GATE_PROMPT, GATE_QUEUE_DEADLINE_SECONDS, OLLAMA_BASE, SCREENS_DIR  # noqa: E402
-
-TRIALS_PER_MODEL = 3
+from vision_bench import corpus, report, runner  # noqa: E402
 
 
-def _parse_verdict(raw: str) -> dict | None:
-    """Same shape gatekeeper._parse_verdict expects — returns None if the
-    response doesn't parse as a valid verdict at all (distinct from a
-    successful parse that just says approved=False)."""
-    match = re.search(r"\{.*\}", raw, re.S)
-    if not match:
-        return None
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    p.add_argument("models", nargs="*", default=["gemma4:31b"], help="Ollama model tags to benchmark")
+    p.add_argument("--warm-trials", type=int, default=1, help="warm trials per non-first scenario (default 1)")
+    p.add_argument("--timeout", type=float, default=180.0, help="per-request timeout in seconds (default 180)")
+    p.add_argument("--force", action="store_true", help="proceed even if competing GPU activity is detected")
+    return p.parse_args()
+
+
+async def main() -> int:
+    args = parse_args()
+
     try:
-        data = json.loads(match.group(0))
-        if "approved" not in data or "message" not in data:
-            return None
-        return {"approved": bool(data["approved"]), "message": str(data["message"])}
-    except json.JSONDecodeError:
-        return None
+        runner.refuse_if_game_mode()
+    except runner.GameModeActive as e:
+        print(f"REFUSING TO RUN: {e}", file=sys.stderr)
+        return 1
 
+    warning = runner.competing_gpu_activity_warning()
+    if warning:
+        print(f"WARNING: {warning}", file=sys.stderr)
+        if not args.force:
+            print("Re-run with --force to proceed anyway, or wait until the GPU is idle.", file=sys.stderr)
+            return 1
 
-async def _unload(model: str) -> None:
-    try:
-        async with httpx.AsyncClient(timeout=10) as c:
-            await c.post(f"{OLLAMA_BASE}/api/generate", json={"model": model, "keep_alive": 0})
-    except Exception:
-        pass
-    await asyncio.sleep(1)  # let Ollama actually free the VRAM before timing the next load
+    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    out_dir = Path(__file__).resolve().parent / "vision_bench" / "results" / timestamp
+    corpus_dir = out_dir / "corpus"
+    scenarios = corpus.build(corpus_dir)
+    scenario_by_key = {s.key: s for s in scenarios}
 
-
-async def _residency(model: str) -> dict | None:
-    try:
-        async with httpx.AsyncClient(timeout=5) as c:
-            r = await c.get(f"{OLLAMA_BASE}/api/ps")
-            for m in r.json().get("models", []):
-                if m.get("model") == model:
-                    return m
-    except Exception:
-        pass
-    return None
-
-
-async def _judge_once(model: str, prompt: str, images_b64: list[str], timeout: float) -> tuple[bool, float, str]:
-    """Returns (timed_out, elapsed_seconds, raw_response_or_error)."""
-    message: dict = {"role": "user", "content": prompt}
-    if images_b64:
-        message["images"] = images_b64
-    payload = {"model": model, "messages": [message], "stream": False}
-    start = time.monotonic()
-    try:
-        async with httpx.AsyncClient(timeout=timeout) as c:
-            r = await c.post(f"{OLLAMA_BASE}/api/chat", json=payload)
-            r.raise_for_status()
-            elapsed = time.monotonic() - start
-            return False, elapsed, r.json().get("message", {}).get("content", "")
-    except httpx.TimeoutException:
-        return True, time.monotonic() - start, ""
-    except Exception as e:
-        return False, time.monotonic() - start, f"ERROR: {e}"
-
-
-def _sample_prompt() -> str:
-    return GATE_PROMPT.format(
-        target="steam",
-        activity_summary="- zed (main.py — editing): ~34m\n- brave-browser (docs): ~12m",
-        discord_status="no",
-        recent_verdicts="(no prior verdicts)",
-    )
-
-
-def _sample_images_b64(limit: int = 3) -> list[str]:
-    import base64
-    paths = sorted(SCREENS_DIR.glob("*.png"), key=lambda p: p.stat().st_mtime, reverse=True)[:limit]
-    return [base64.b64encode(p.read_bytes()).decode() for p in paths]
-
-
-async def benchmark_model(model: str, prompt: str, images_b64: list[str]) -> dict:
-    print(f"\n=== {model} ===")
-    await _unload(model)
-
-    cold_timed_out, cold_elapsed, _cold_raw = await _judge_once(model, prompt, images_b64, GATE_QUEUE_DEADLINE_SECONDS)
-    residency = await _residency(model)
-    print(f"cold: {'TIMEOUT' if cold_timed_out else f'{cold_elapsed:.1f}s'}")
-    if residency:
-        total = residency.get("size", 0) / 1e9
-        vram = residency.get("size_vram", 0) / 1e9
-        print(f"memory split: {vram:.1f}GB VRAM / {total:.1f}GB total ({100*vram/total:.0f}% GPU)" if total else "memory split: unknown")
-
-    warm_results = []
-    timeouts = 0
-    for i in range(TRIALS_PER_MODEL):
-        timed_out, elapsed, raw = await _judge_once(model, prompt, images_b64, GATE_QUEUE_DEADLINE_SECONDS)
-        if timed_out:
-            timeouts += 1
-            print(f"warm trial {i+1}: TIMEOUT (> {GATE_QUEUE_DEADLINE_SECONDS}s)")
-            continue
-        verdict = _parse_verdict(raw)
-        valid = verdict is not None
-        warm_results.append(elapsed)
-        print(f"warm trial {i+1}: {elapsed:.1f}s, verdict_valid={valid}" + (f", approved={verdict['approved']}" if valid else f", raw={raw[:80]!r}"))
-
-    return {
-        "model": model,
-        "cold_seconds": None if cold_timed_out else round(cold_elapsed, 1),
-        "cold_timed_out": cold_timed_out,
-        "warm_seconds_avg": round(sum(warm_results) / len(warm_results), 1) if warm_results else None,
-        "vram_gb": round(residency.get("size_vram", 0) / 1e9, 1) if residency else None,
-        "total_gb": round(residency.get("size", 0) / 1e9, 1) if residency else None,
-        "timeout_rate": f"{timeouts}/{TRIALS_PER_MODEL}",
-    }
-
-
-async def main() -> None:
-    models = sys.argv[1:] or ["gemma4:31b"]
-    prompt = _sample_prompt()
-    images_b64 = _sample_images_b64()
-    print(f"Benchmarking {len(models)} model(s) with {len(images_b64)} real screenshot(s) attached, "
-          f"deadline={GATE_QUEUE_DEADLINE_SECONDS}s, {TRIALS_PER_MODEL} warm trials each.")
+    print(f"Auditioning {len(args.models)} model(s) against {len(scenarios)} scenarios "
+          f"({args.warm_trials} warm trial(s) each), timeout={args.timeout}s.")
+    print(f"Corpus written to {corpus_dir} (synthetic — no real desktop content).")
 
     results = []
-    for model in models:
-        results.append(await benchmark_model(model, prompt, images_b64))
-        await _unload(model)  # leave a clean slate for the next candidate / for real use afterward
+    for model in args.models:
+        print(f"\n=== {model} ===")
+        start = time.monotonic()
+        try:
+            result = await runner.run_model(model, scenarios, args.timeout, args.warm_trials)
+        except Exception as e:
+            print(f"  FAILED: {e}")
+            results.append({"model": model, "error": str(e), "trials": []})
+            continue
+        if result.get("error"):
+            print(f"  FAILED: {result['error']}")
+            results.append(result)
+            continue
+        elapsed = time.monotonic() - start
+        n_trials = len(result["trials"])
+        n_timeouts = sum(1 for t in result["trials"] if t["timed_out"])
+        print(f"  {n_trials} trials in {elapsed:.0f}s, {n_timeouts} timeout(s)")
+        results.append(result)
 
-    print("\n=== Summary ===")
-    print(f"{'model':<20} {'cold':>8} {'warm avg':>10} {'vram/total':>14} {'timeouts':>10}")
-    for r in results:
-        cold = "TIMEOUT" if r["cold_timed_out"] else f"{r['cold_seconds']}s"
-        warm = f"{r['warm_seconds_avg']}s" if r["warm_seconds_avg"] is not None else "n/a"
-        mem = f"{r['vram_gb']}/{r['total_gb']}GB" if r["vram_gb"] is not None else "unknown"
-        print(f"{r['model']:<20} {cold:>8} {warm:>10} {mem:>14} {r['timeout_rate']:>10}")
+    out_dir.mkdir(parents=True, exist_ok=True)
+    runner.save_raw(results, out_dir / "raw.json")
+
+    scores = [report.score_model(r, scenario_by_key) for r in results if not r.get("error")]
+    md = report.render_markdown(scores, scenarios) + "\n\n" + report.render_scenario_breakdown(results, scenarios)
+    (out_dir / "report.md").write_text(md)
+
+    print(f"\n{md}")
+    print(f"\nRaw results: {out_dir / 'raw.json'}")
+    print(f"Report: {out_dir / 'report.md'}")
+    return 0
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    sys.exit(asyncio.run(main()))

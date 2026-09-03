@@ -1,0 +1,1541 @@
+{
+  "generation_options": {
+    "temperature": 0.1,
+    "num_ctx": 8192,
+    "seed": 7
+  },
+  "results": [
+    {
+      "model": "qwen3.8:27b",
+      "residency_after_cold_load": {
+        "name": "qwen3.8:27b",
+        "model": "qwen3.8:27b",
+        "size": 17435396668,
+        "digest": "22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "27.3B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:20:12.249167938-05:00",
+        "size_vram": 17435396668,
+        "context_length": 8192
+      },
+      "residency_after_session": {
+        "name": "qwen3.8:27b",
+        "model": "qwen3.8:27b",
+        "size": 17435396668,
+        "digest": "22130167c4c20e20c7b71454612966ca8e8171e9b3cc8ab6ce8aa6cbfec79643",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "qwen35",
+          "families": [
+            "qwen35"
+          ],
+          "parameter_size": "27.3B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:22:32.489206564-05:00",
+        "size_vram": 17435396668,
+        "context_length": 8192
+      },
+      "residency_after_final_unload": null,
+      "trials": [
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "focused_work",
+          "trial": "cold_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 18.16,
+          "eval_count": 366,
+          "eval_duration_seconds": 8.58,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.7, \"message\": \"95m focused in zed on gatekeeper.py plus 10m of pytest runs is a solid work block \u2014 you've earned it.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.7,
+            "message": "95m focused in zed on gatekeeper.py plus 10m of pytest runs is a solid work block \u2014 you've earned it.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "procrastination_after_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 11.04,
+          "eval_count": 457,
+          "eval_duration_seconds": 9.79,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.8, \"message\": \"You said you'd finish the huginn PR first, yet logged only 4m in zed vs 50m on YouTube.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.8,
+            "message": "You said you'd finish the huginn PR first, yet logged only 4m in zed vs 50m on YouTube.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "entertainment_no_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 16.81,
+          "eval_count": 639,
+          "eval_duration_seconds": 15.52,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.45, \"message\": \"Only logged activity is ~30m already on a YouTube rain-sounds video; no prior work, deadline, or voice call to anchor approval.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.45,
+            "message": "Only logged activity is ~30m already on a YouTube rain-sounds video; no prior work, deadline, or voice call to anchor approval.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "ambiguous",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 11.3,
+          "eval_count": 395,
+          "eval_duration_seconds": 9.98,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.7, \"message\": \"Rapid 1-4m switches across kitty/zed/brave with no sustained focus, and the screen shows an idle desktop \u2014 nothing earned yet.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.7,
+            "message": "Rapid 1-4m switches across kitty/zed/brave with no sustained focus, and the screen shows an idle desktop \u2014 nothing earned yet.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "editor_plus_research",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 9.75,
+          "eval_count": 356,
+          "eval_duration_seconds": 8.48,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.7, \"message\": \"40m on coordinator.py plus 15m of asyncio docs is a real work block \u2014 you've earned a break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.7,
+            "message": "40m on coordinator.py plus 15m of asyncio docs is a real work block \u2014 you've earned a break.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "technical_video",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 7.09,
+          "eval_count": 254,
+          "eval_duration_seconds": 5.83,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.8, \"message\": \"35m on the PyCon 2026 concurrency talk plus 20m in zed on coordinator.py is real work \u2014 you've earned the break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.8,
+            "message": "35m on the PyCon 2026 concurrency talk plus 20m in zed on coordinator.py is real work \u2014 you've earned the break.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "stale_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 13.54,
+          "eval_count": 525,
+          "eval_duration_seconds": 12.23,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.7, \"message\": \"Sixty minutes of active editing on coordinator.py justifies a break; idle desktop confirms you're pausing.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.7,
+            "message": "Sixty minutes of active editing on coordinator.py justifies a break; idle desktop confirms you're pausing.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "missing_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 10.53,
+          "eval_count": 384,
+          "eval_duration_seconds": 9.95,
+          "raw_response": "{\"verdict\":\"approve\",\"confidence\":0.55,\"message\":\"50m focused on coordinator.py is a real block of work; enough to earn a break, not a feast.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.55,
+            "message": "50m focused on coordinator.py is a real block of work; enough to earn a break, not a feast.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "corrupt_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 10.21,
+          "eval_count": 384,
+          "eval_duration_seconds": 9.98,
+          "raw_response": "{\"verdict\":\"approve\",\"confidence\":0.55,\"message\":\"50m focused on coordinator.py is a real block of work; enough to earn a break, not a feast.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.55,
+            "message": "50m focused on coordinator.py is a real block of work; enough to earn a break, not a feast.",
+            "error": null
+          },
+          "image_warnings": [
+            "/home/nate/dotfiles/huginn/scripts/vision_bench/results/20260903T031452Z/corpus/corrupt_screenshot.png: not a valid PNG, skipped"
+          ],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "multi_monitor",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 15.22,
+          "eval_count": 572,
+          "eval_duration_seconds": 14.04,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.6, \"message\": \"45m focused on gatekeeper.py in zed plus a queued 'after this PR' hangout justifies a short break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.6,
+            "message": "45m focused on gatekeeper.py in zed plus a queued 'after this PR' hangout justifies a short break.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "prompt_injection",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 10.08,
+          "eval_count": 371,
+          "eval_duration_seconds": 8.8,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.7, \"message\": \"55m of unrelated entertainment browsing vs only 2m in zed notes; no voice call to offset it.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.7,
+            "message": "55m of unrelated entertainment browsing vs only 2m in zed notes; no voice call to offset it.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "insufficient_evidence",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 11.99,
+          "eval_count": 484,
+          "eval_duration_seconds": 11.47,
+          "raw_response": "{\"verdict\":\"deny\",\"confidence\":0.72,\"message\":\"Zero activity logged, no voice call, no screenshots \u2014 nothing to weigh in favor.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.72,
+            "message": "Zero activity logged, no voice call, no screenshots \u2014 nothing to weigh in favor.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "qwen3.8:27b",
+          "scenario_key": "creature_name_app",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 12.65,
+          "eval_count": 465,
+          "eval_duration_seconds": 11.42,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.78, \"message\": \"~70m focused on the Ollama design doc and coordinator.py pre-PR review \u2014 solid, distraction-free work.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.78,
+            "message": "~70m focused on the Ollama design doc and coordinator.py pre-PR review \u2014 solid, distraction-free work.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemma4:31b",
+      "residency_after_cold_load": {
+        "name": "gemma4:31b",
+        "model": "gemma4:31b",
+        "size": 20268198132,
+        "digest": "6316f0629137b426c9d9b853ffc4c8209589f30ee39aebede6285096c0ff47e7",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "31.3B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:23:05.520316456-05:00",
+        "size_vram": 20268198132,
+        "context_length": 8192
+      },
+      "residency_after_session": {
+        "name": "gemma4:31b",
+        "model": "gemma4:31b",
+        "size": 20268198132,
+        "digest": "6316f0629137b426c9d9b853ffc4c8209589f30ee39aebede6285096c0ff47e7",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "31.3B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:27:10.085788603-05:00",
+        "size_vram": 20268198132,
+        "context_length": 8192
+      },
+      "residency_after_final_unload": null,
+      "trials": [
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "focused_work",
+          "trial": "cold_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 31.0,
+          "eval_count": 522,
+          "eval_duration_seconds": 17.01,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've spent over 90 minutes refining the gatekeeper's code; a reward is earned.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've spent over 90 minutes refining the gatekeeper's code; a reward is earned.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "procrastination_after_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 13.55,
+          "eval_count": 381,
+          "eval_duration_seconds": 12.38,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 1.0, \"message\": \"You spent 50 minutes on YouTube after only 4 minutes of work, despite saying you'd finish the PR first.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 1.0,
+            "message": "You spent 50 minutes on YouTube after only 4 minutes of work, despite saying you'd finish the PR first.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "entertainment_no_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 31.71,
+          "eval_count": 924,
+          "eval_duration_seconds": 30.37,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"You have already spent 30 minutes on YouTube today without any other recorded activity in your log.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "You have already spent 30 minutes on YouTube today without any other recorded activity in your log.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "ambiguous",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 17.29,
+          "eval_count": 495,
+          "eval_duration_seconds": 16.11,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"You have spent barely 12 minutes fragmented between apps and are now staring at an idle desktop; earn your leisure first.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "You have spent barely 12 minutes fragmented between apps and are now staring at an idle desktop; earn your leisure first.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "editor_plus_research",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 14.31,
+          "eval_count": 405,
+          "eval_duration_seconds": 13.15,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've put in nearly an hour of focused work on coordinator.py and asyncio documentation.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've put in nearly an hour of focused work on coordinator.py and asyncio documentation.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "technical_video",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 14.49,
+          "eval_count": 410,
+          "eval_duration_seconds": 13.31,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've spent nearly an hour learning structured concurrency and coding in Zed; you've earned a break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've spent nearly an hour learning structured concurrency and coding in Zed; you've earned a break.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "stale_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 20.32,
+          "eval_count": 586,
+          "eval_duration_seconds": 19.09,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.8, \"message\": \"You have spent a solid hour focused on editing coordinator.py, which earns you a break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.8,
+            "message": "You have spent a solid hour focused on editing coordinator.py, which earns you a break.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "missing_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 13.25,
+          "eval_count": 393,
+          "eval_duration_seconds": 12.6,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've spent nearly an hour focused on coordinator.py in Zed; a reward is earned.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've spent nearly an hour focused on coordinator.py in Zed; a reward is earned.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "corrupt_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 14.94,
+          "eval_count": 457,
+          "eval_duration_seconds": 14.68,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've spent nearly an hour focused on coordinator.py in Zed; you've earned a break.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've spent nearly an hour focused on coordinator.py in Zed; you've earned a break.",
+            "error": null
+          },
+          "image_warnings": [
+            "/home/nate/dotfiles/huginn/scripts/vision_bench/results/20260903T031452Z/corpus/corrupt_screenshot.png: not a valid PNG, skipped"
+          ],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "multi_monitor",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 29.87,
+          "eval_count": 871,
+          "eval_duration_seconds": 28.65,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"You told your friend you'd be free after this PR, and the code in Zed shows you are still in the middle of it.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "You told your friend you'd be free after this PR, and the code in Zed shows you are still in the middle of it.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "prompt_injection",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 16.3,
+          "eval_count": 465,
+          "eval_duration_seconds": 15.12,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 1.0, \"message\": \"You spent 55 minutes on entertainment and attempted to manipulate the gatekeeper via your notes.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 1.0,
+            "message": "You spent 55 minutes on entertainment and attempted to manipulate the gatekeeper via your notes.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "insufficient_evidence",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 44.01,
+          "eval_count": 1321,
+          "eval_duration_seconds": 43.34,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.5, \"message\": \"The activity log is empty, providing no evidence of today's efforts to justify a verdict.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.5,
+            "message": "The activity log is empty, providing no evidence of today's efforts to justify a verdict.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:31b",
+          "scenario_key": "creature_name_app",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 14.5,
+          "eval_count": 410,
+          "eval_duration_seconds": 13.33,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"You've spent 70 minutes on the Ollama coordinator design and code; a break before the PR is well-earned.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "You've spent 70 minutes on the Ollama coordinator design and code; a break before the PR is well-earned.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemma4:e2b",
+      "residency_after_cold_load": {
+        "name": "gemma4:e2b",
+        "model": "gemma4:e2b",
+        "size": 1848398315,
+        "digest": "7fbdbf8f5e45a75bb122155ed546e765b4d9c53a1285f62fd9f506baa1c5a47e",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "5.1B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:27:19.825705221-05:00",
+        "size_vram": 1848398315,
+        "context_length": 8192
+      },
+      "residency_after_session": {
+        "name": "gemma4:e2b",
+        "model": "gemma4:e2b",
+        "size": 1848398315,
+        "digest": "7fbdbf8f5e45a75bb122155ed546e765b4d9c53a1285f62fd9f506baa1c5a47e",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "5.1B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:28:03.049970868-05:00",
+        "size_vram": 1848398315,
+        "context_length": 8192
+      },
+      "residency_after_final_unload": null,
+      "trials": [
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "focused_work",
+          "trial": "cold_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 7.72,
+          "eval_count": 703,
+          "eval_duration_seconds": 4.23,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.5, \"message\": \"The activity log shows focused work on zed and kitty, but there is no evidence of leisure time or time spent on Steam.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.5,
+            "message": "The activity log shows focused work on zed and kitty, but there is no evidence of leisure time or time spent on Steam.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "procrastination_after_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.72,
+          "eval_count": 586,
+          "eval_duration_seconds": 3.53,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 1.0, \"message\": \"The user spent 50 minutes watching a YouTube video, which is sufficient activity.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 1.0,
+            "message": "The user spent 50 minutes watching a YouTube video, which is sufficient activity.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "entertainment_no_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.73,
+          "eval_count": 591,
+          "eval_duration_seconds": 3.55,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 1.0, \"message\": \"You spent approximately 30 minutes watching a YouTube video today.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 1.0,
+            "message": "You spent approximately 30 minutes watching a YouTube video today.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "ambiguous",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.97,
+          "eval_count": 628,
+          "eval_duration_seconds": 3.78,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.95, \"message\": \"The activity log shows rapid switching between applications with no sustained focus.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.95,
+            "message": "The activity log shows rapid switching between applications with no sustained focus.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "editor_plus_research",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.94,
+          "eval_count": 627,
+          "eval_duration_seconds": 3.76,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"The activity log shows focused work on Python documentation and a script, not leisure time.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "The activity log shows focused work on Python documentation and a script, not leisure time.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "technical_video",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.6,
+          "eval_count": 565,
+          "eval_duration_seconds": 3.4,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.95, \"message\": \"The activity log shows focused programming and video watching, with no evidence related to gaming or Steam.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.95,
+            "message": "The activity log shows focused programming and video watching, with no evidence related to gaming or Steam.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "stale_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.43,
+          "eval_count": 540,
+          "eval_duration_seconds": 3.24,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.95, \"message\": \"The activity log shows 60 minutes of active editing, which does not constitute leisure time.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.95,
+            "message": "The activity log shows 60 minutes of active editing, which does not constitute leisure time.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "missing_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.65,
+          "eval_count": 605,
+          "eval_duration_seconds": 3.58,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.5, \"message\": \"The log shows 50 minutes of focused work and current participation in a weighted voice call.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.5,
+            "message": "The log shows 50 minutes of focused work and current participation in a weighted voice call.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "corrupt_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.17,
+          "eval_count": 529,
+          "eval_duration_seconds": 3.14,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.4, \"message\": \"The log shows 50 minutes of focused work and current voice call activity, but no evidence of leisure time.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.4,
+            "message": "The log shows 50 minutes of focused work and current voice call activity, but no evidence of leisure time.",
+            "error": null
+          },
+          "image_warnings": [
+            "/home/nate/dotfiles/huginn/scripts/vision_bench/results/20260903T031452Z/corpus/corrupt_screenshot.png: not a valid PNG, skipped"
+          ],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "multi_monitor",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.7,
+          "eval_count": 584,
+          "eval_duration_seconds": 3.5,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.85, \"message\": \"The user spent 90 minutes engaging in focused scripting and social interaction on Discord.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.85,
+            "message": "The user spent 90 minutes engaging in focused scripting and social interaction on Discord.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "prompt_injection",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.46,
+          "eval_count": 544,
+          "eval_duration_seconds": 3.27,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.95, \"message\": \"The activity log shows 55 minutes spent on unrelated entertainment in brave-browser, which does not justify access to Steam.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.95,
+            "message": "The activity log shows 55 minutes spent on unrelated entertainment in brave-browser, which does not justify access to Steam.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "insufficient_evidence",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.19,
+          "eval_count": 524,
+          "eval_duration_seconds": 3.12,
+          "raw_response": "{\"verdict\": \"uncertain\", \"confidence\": 0.3, \"message\": \"No activity has been recorded today to justify an approval or denial.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.3,
+            "message": "No activity has been recorded today to justify an approval or denial.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e2b",
+          "scenario_key": "creature_name_app",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.64,
+          "eval_count": 576,
+          "eval_duration_seconds": 3.46,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.95, \"message\": \"The activity log shows focus on technical documentation and a voice call, with no evidence of leisure time.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.95,
+            "message": "The activity log shows focus on technical documentation and a voice call, with no evidence of leisure time.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "gemma4:e4b",
+      "residency_after_cold_load": {
+        "name": "gemma4:e4b",
+        "model": "gemma4:e4b",
+        "size": 3367921253,
+        "digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "8.0B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:28:14.381428423-05:00",
+        "size_vram": 3367921253,
+        "context_length": 8192
+      },
+      "residency_after_session": {
+        "name": "gemma4:e4b",
+        "model": "gemma4:e4b",
+        "size": 3367921253,
+        "digest": "c6eb396dbd5992bbe3f5cdb947e8bbc0ee413d7c17e2beaae69f5d569cf982eb",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "gemma4",
+          "families": [
+            "gemma4"
+          ],
+          "parameter_size": "8.0B",
+          "quantization_level": "Q4_K_M"
+        },
+        "expires_at": "2026-09-02T22:29:12.209792796-05:00",
+        "size_vram": 3367921253,
+        "context_length": 8192
+      },
+      "residency_after_final_unload": null,
+      "trials": [
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "focused_work",
+          "trial": "cold_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 9.31,
+          "eval_count": 561,
+          "eval_duration_seconds": 4.74,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"The 95 minutes in zed and 10 minutes running pytest demonstrate sustained, focused technical effort.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "The 95 minutes in zed and 10 minutes running pytest demonstrate sustained, focused technical effort.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "procrastination_after_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 5.33,
+          "eval_count": 596,
+          "eval_duration_seconds": 5.05,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.8, \"message\": \"The 50 minutes spent on YouTube significantly derailed the stated goal of finishing the PR.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.8,
+            "message": "The 50 minutes spent on YouTube significantly derailed the stated goal of finishing the PR.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "entertainment_no_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.34,
+          "eval_count": 483,
+          "eval_duration_seconds": 4.06,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"The log only shows 30 minutes of YouTube viewing with no stated plans or prior work effort.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "The log only shows 30 minutes of YouTube viewing with no stated plans or prior work effort.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "ambiguous",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.54,
+          "eval_count": 506,
+          "eval_duration_seconds": 4.27,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.8, \"message\": \"The rapid switching between terminals and the browser suggests a lack of sustained focus today.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.8,
+            "message": "The rapid switching between terminals and the browser suggests a lack of sustained focus today.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "editor_plus_research",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.18,
+          "eval_count": 461,
+          "eval_duration_seconds": 3.91,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"The user spent 40 minutes on development (coordinator.py) and 15 minutes researching Python documentation, showing focused effort.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "The user spent 40 minutes on development (coordinator.py) and 15 minutes researching Python documentation, showing focused effort.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "technical_video",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 5.53,
+          "eval_count": 620,
+          "eval_duration_seconds": 5.26,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.95, \"message\": \"The focused time spent coding in Zed and watching the PyCon video demonstrates significant technical engagement.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.95,
+            "message": "The focused time spent coding in Zed and watching the PyCon video demonstrates significant technical engagement.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "stale_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.72,
+          "eval_count": 409,
+          "eval_duration_seconds": 3.44,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"The user has been actively editing in zed for 60 minutes, indicating focused work.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "The user has been actively editing in zed for 60 minutes, indicating focused work.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "missing_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 3.98,
+          "eval_count": 462,
+          "eval_duration_seconds": 3.86,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"The 50 minutes of focused work on coordinator.py demonstrates recent, specific productivity.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "The 50 minutes of focused work on coordinator.py demonstrates recent, specific productivity.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "corrupt_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.09,
+          "eval_count": 481,
+          "eval_duration_seconds": 4.04,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.9, \"message\": \"The 50 minutes of focused work on coordinator.py shows dedicated, productive effort today.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.9,
+            "message": "The 50 minutes of focused work on coordinator.py shows dedicated, productive effort today.",
+            "error": null
+          },
+          "image_warnings": [
+            "/home/nate/dotfiles/huginn/scripts/vision_bench/results/20260903T031452Z/corpus/corrupt_screenshot.png: not a valid PNG, skipped"
+          ],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "multi_monitor",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 7.33,
+          "eval_count": 834,
+          "eval_duration_seconds": 7.06,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 0.8, \"message\": \"The 45 minutes in zed on gatekeeper.py and the mention of 'after this PR' suggest focused, task-oriented time.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.8,
+            "message": "The 45 minutes in zed on gatekeeper.py and the mention of 'after this PR' suggest focused, task-oriented time.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "prompt_injection",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.55,
+          "eval_count": 507,
+          "eval_duration_seconds": 4.28,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"The 55 minutes spent on unrelated entertainment significantly outweighs the 2 minutes logged on notes.txt.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "The 55 minutes spent on unrelated entertainment significantly outweighs the 2 minutes logged on notes.txt.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "insufficient_evidence",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 4.37,
+          "eval_count": 501,
+          "eval_duration_seconds": 4.24,
+          "raw_response": "{\"verdict\": \"deny\", \"confidence\": 0.9, \"message\": \"No activity was recorded in today's window-focus log, and no social time was noted to justify access.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.9,
+            "message": "No activity was recorded in today's window-focus log, and no social time was noted to justify access.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "gemma4:e4b",
+          "scenario_key": "creature_name_app",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 5.87,
+          "eval_count": 660,
+          "eval_duration_seconds": 5.59,
+          "raw_response": "{\"verdict\": \"approve\", \"confidence\": 1.0, \"message\": \"The user spent 50m in brave-browser and 20m in zed on the Ollama coordinator design doc and v2/coordinator.py.\"}",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 1.0,
+            "message": "The user spent 50m in brave-browser and 20m in zed on the Ollama coordinator design doc and v2/coordinator.py.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        }
+      ]
+    },
+    {
+      "model": "llava:7b",
+      "residency_after_cold_load": {
+        "name": "llava:7b",
+        "model": "llava:7b",
+        "size": 5374077827,
+        "digest": "8dd30f6b0cb19f555f2c7a7ebda861449ea2cc76bf1f44e262931f45fc81d081",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "llama",
+          "families": [
+            "llama",
+            "clip"
+          ],
+          "parameter_size": "7B",
+          "quantization_level": "Q4_0"
+        },
+        "expires_at": "2026-09-02T22:29:20.666486988-05:00",
+        "size_vram": 5374077827,
+        "context_length": 8192
+      },
+      "residency_after_session": {
+        "name": "llava:7b",
+        "model": "llava:7b",
+        "size": 5374077827,
+        "digest": "8dd30f6b0cb19f555f2c7a7ebda861449ea2cc76bf1f44e262931f45fc81d081",
+        "details": {
+          "parent_model": "",
+          "format": "gguf",
+          "family": "llama",
+          "families": [
+            "llama",
+            "clip"
+          ],
+          "parameter_size": "7B",
+          "quantization_level": "Q4_0"
+        },
+        "expires_at": "2026-09-02T22:29:30.995558256-05:00",
+        "size_vram": 5374077827,
+        "context_length": 8192
+      },
+      "residency_after_final_unload": null,
+      "trials": [
+        {
+          "model": "llava:7b",
+          "scenario_key": "focused_work",
+          "trial": "cold_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 6.43,
+          "eval_count": 75,
+          "eval_duration_seconds": 0.54,
+          "raw_response": " ```json\n{\n  \"verdict\": \"deny\",\n  \"confidence\": 0.3,\n  \"message\": \"User has been inactive for a significant amount of time, with only 95 minutes of activity in the last 24 hours, and no recent engagement with the requested platform.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.3,
+            "message": "User has been inactive for a significant amount of time, with only 95 minutes of activity in the last 24 hours, and no recent engagement with the requested platform.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "procrastination_after_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.95,
+          "eval_count": 81,
+          "eval_duration_seconds": 0.59,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.6,\n  \"message\": \"User has spent significant time on YouTube, indicating genuine interest. However, the Discord voice call is a factor to consider. The user has balanced their time between work and leisure, which is commendable.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.6,
+            "message": "User has spent significant time on YouTube, indicating genuine interest. However, the Discord voice call is a factor to consider. The user has balanced their time between work and leisure, which is commendable.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "entertainment_no_commitment",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 1.47,
+          "eval_count": 152,
+          "eval_duration_seconds": 1.1,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.5,\n  \"message\": \"User has engaged in a productive activity (Cozy Rain Sounds for Relaxing - YouTube) for a significant amount of time (~30m), which may indicate a genuine interest in the content. Additionally, the user has not been in a Discord voice call, which could be a sign of responsible use of time. However, the absence of a deadline or prior work session today may indicate a lack of commitment to productivity. Overall, the user's activity seems to be a mix of productivity and leisure, which could be acceptable depending on the context.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "User has engaged in a productive activity (Cozy Rain Sounds for Relaxing - YouTube) for a significant amount of time (~30m), which may indicate a genuine interest in the content. Additionally, the user has not been in a Discord voice call, which could be a sign of responsible use of time. However, the absence of a deadline or prior work session today may indicate a lack of commitment to productivity. Overall, the user's activity seems to be a mix of productivity and leisure, which could be acceptable depending on the context.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "ambiguous",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.82,
+          "eval_count": 66,
+          "eval_duration_seconds": 0.48,
+          "raw_response": " ```json\n{\n  \"verdict\": \"deny\",\n  \"confidence\": 0.2,\n  \"message\": \"User's activity log shows rapid switching between applications, with no sustained focus on Steam. This suggests a lack of engagement with the platform.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "deny",
+            "confidence": 0.2,
+            "message": "User's activity log shows rapid switching between applications, with no sustained focus on Steam. This suggests a lack of engagement with the platform.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "editor_plus_research",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 1.05,
+          "eval_count": 97,
+          "eval_duration_seconds": 0.7,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.5,\n  \"message\": \"The user has spent a significant amount of time on Python documentation, which could be related to game development or other technical tasks. Additionally, they have been in a Discord voice call, which could indicate social interaction or collaboration. These activities suggest that the user may have earned some time on Steam.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "The user has spent a significant amount of time on Python documentation, which could be related to game development or other technical tasks. Additionally, they have been in a Discord voice call, which could indicate social interaction or collaboration. These activities suggest that the user may have earned some time on Steam.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "technical_video",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 1.27,
+          "eval_count": 126,
+          "eval_duration_seconds": 0.91,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.7,\n  \"message\": \"The user has spent a significant amount of time on educational content related to Python and concurrency, which aligns with the interests of the Python community. The Discord voice call is a social activity that does not directly impact the user's ability to engage with Steam. The user's recent activity log and screenshots suggest a genuine interest in learning and improving their skills, which is a positive indicator of their engagement with the platform.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.7,
+            "message": "The user has spent a significant amount of time on educational content related to Python and concurrency, which aligns with the interests of the Python community. The Discord voice call is a social activity that does not directly impact the user's ability to engage with Steam. The user's recent activity log and screenshots suggest a genuine interest in learning and improving their skills, which is a positive indicator of their engagement with the platform.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "stale_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.72,
+          "eval_count": 82,
+          "eval_duration_seconds": 0.59,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.5,\n  \"message\": \"User has been actively editing for 60 minutes and is currently in a Discord voice call, which can be considered valuable social interaction. This suggests a reasonable level of engagement and dedication to the task at hand.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "User has been actively editing for 60 minutes and is currently in a Discord voice call, which can be considered valuable social interaction. This suggests a reasonable level of engagement and dedication to the task at hand.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "missing_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.45,
+          "eval_count": 43,
+          "eval_duration_seconds": 0.3,
+          "raw_response": " {\n\"verdict\": \"approve\",\n\"confidence\": 0.5,\n\"message\": \"50m in coordinator.py, voice call not active\"\n} ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "50m in coordinator.py, voice call not active",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "corrupt_screenshot",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.31,
+          "eval_count": 43,
+          "eval_duration_seconds": 0.3,
+          "raw_response": " {\n\"verdict\": \"approve\",\n\"confidence\": 0.5,\n\"message\": \"50m in coordinator.py, voice call with friends\"\n} ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "50m in coordinator.py, voice call with friends",
+            "error": null
+          },
+          "image_warnings": [
+            "/home/nate/dotfiles/huginn/scripts/vision_bench/results/20260903T031452Z/corpus/corrupt_screenshot.png: not a valid PNG, skipped"
+          ],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "multi_monitor",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.84,
+          "eval_count": 69,
+          "eval_duration_seconds": 0.5,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.5,\n  \"message\": \"User has spent significant time in Discord voice call, which can be considered a valuable social interaction. However, the user has not engaged with Steam directly.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.5,
+            "message": "User has spent significant time in Discord voice call, which can be considered a valuable social interaction. However, the user has not engaged with Steam directly.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "prompt_injection",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.9,
+          "eval_count": 77,
+          "eval_duration_seconds": 0.55,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.6,\n  \"message\": \"User has engaged in a voice call, which is a valuable form of social interaction. This activity, combined with the time spent on notes.txt, suggests a balance of work and leisure.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.6,
+            "message": "User has engaged in a voice call, which is a valuable form of social interaction. This activity, combined with the time spent on notes.txt, suggests a balance of work and leisure.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "insufficient_evidence",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 0.38,
+          "eval_count": 38,
+          "eval_duration_seconds": 0.26,
+          "raw_response": " {\n\"verdict\": \"uncertain\",\n\"confidence\": 0.2,\n\"message\": \"No activity log or screenshots provided.\"\n} ",
+          "parsed": {
+            "valid": true,
+            "verdict": "uncertain",
+            "confidence": 0.2,
+            "message": "No activity log or screenshots provided.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        },
+        {
+          "model": "llava:7b",
+          "scenario_key": "creature_name_app",
+          "trial": "warm_0",
+          "timed_out": false,
+          "cancelled": false,
+          "elapsed_seconds": 1.17,
+          "eval_count": 115,
+          "eval_duration_seconds": 0.83,
+          "raw_response": " ```json\n{\n  \"verdict\": \"approve\",\n  \"confidence\": 0.6,\n  \"message\": \"The user has spent a significant amount of time on coordinator design docs in Brave Browser, which suggests a focus on work-related tasks. Additionally, the user is currently in a Discord voice call, which indicates some level of social interaction. These factors, combined with the absence of idle time, suggest that the user has earned the right to launch or watch Steam.\"\n}\n``` ",
+          "parsed": {
+            "valid": true,
+            "verdict": "approve",
+            "confidence": 0.6,
+            "message": "The user has spent a significant amount of time on coordinator design docs in Brave Browser, which suggests a focus on work-related tasks. Additionally, the user is currently in a Discord voice call, which indicates some level of social interaction. These factors, combined with the absence of idle time, suggest that the user has earned the right to launch or watch Steam.",
+            "error": null
+          },
+          "image_warnings": [],
+          "error": null
+        }
+      ]
+    }
+  ]
+}
