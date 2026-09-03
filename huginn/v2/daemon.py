@@ -1070,9 +1070,16 @@ async def main() -> None:
     server = await asyncio.start_unix_server(handle_connection, path=str(SOCKET_PATH))
     os.chmod(str(SOCKET_PATH), 0o600)
 
+    # serve_forever() runs as its own task so a signal can cancel exactly
+    # that task (which is how you stop serve_forever() — cancellation, not
+    # server.close() alone) instead of stopping the loop out from under
+    # asyncio.run(), which owns the loop's lifecycle for the duration of
+    # this coroutine. See _shutdown().
+    serve_task = asyncio.ensure_future(server.serve_forever())
+
     loop = asyncio.get_running_loop()
     for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, lambda: asyncio.ensure_future(_shutdown(server)))
+        loop.add_signal_handler(sig, lambda: asyncio.ensure_future(_shutdown(server, serve_task)))
 
     coordinator.set_game_mode_check(lambda: context.collect_interaction().mode == "game")
     coordinator.start()
@@ -1083,17 +1090,26 @@ async def main() -> None:
     asyncio.ensure_future(screenshot_worker())
 
     log.info("Huginn v2 listening on %s", SOCKET_PATH)
-    async with server:
-        await server.serve_forever()
-
-
-async def _shutdown(server: asyncio.Server) -> None:
-    log.info("shutting down")
-    server.close()
-    await server.wait_closed()
+    try:
+        await serve_task
+    except asyncio.CancelledError:
+        pass
     if SOCKET_PATH.exists():
         SOCKET_PATH.unlink()
-    asyncio.get_event_loop().stop()
+
+
+async def _shutdown(server: asyncio.Server, serve_task: "asyncio.Task") -> None:
+    """Cancel serve_task (which is what actually stops serve_forever() —
+    closing the server alone does not) and let main() unwind and return
+    normally. Previously called asyncio.get_event_loop().stop(), which
+    stops the loop out from under asyncio.run()'s own run_until_complete
+    machinery — main()'s Future never gets to finish, producing
+    'RuntimeError: Event loop stopped before Future completed.' on every
+    shutdown. Cancellation, not loop.stop(), is the correct way to end
+    serve_forever() under asyncio.run()."""
+    log.info("shutting down")
+    server.close()
+    serve_task.cancel()
 
 
 if __name__ == "__main__":
