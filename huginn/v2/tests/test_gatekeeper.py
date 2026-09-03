@@ -12,16 +12,25 @@ import asyncio
 
 import gatekeeper
 from coordinator import Denial
+from evidence import EvidenceCheck
 from llm import CoordinatorDenied
 
 
 def _stub_common(monkeypatch):
+    """Stubs for tests about game-mode/timeout/deadline behavior, NOT about
+    evidence validation itself (that's test_evidence.py + the dedicated
+    evidence-short-circuit tests below) — so evidence validation is stubbed
+    to always pass, letting these tests reach judge_local_only as before."""
     monkeypatch.setattr(gatekeeper, "last_verdict", lambda *a, **kw: None)
-    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: ["/fake/screenshot.png"])
     monkeypatch.setattr(gatekeeper, "recent_verdicts", lambda *a, **kw: [])
     monkeypatch.setattr(gatekeeper, "activity_since", lambda *a, **kw: [])
     monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: None)
     monkeypatch.setattr(gatekeeper, "in_discord_call", lambda: False)
+    monkeypatch.setattr(
+        gatekeeper, "validate_screenshots",
+        lambda paths, **kw: EvidenceCheck(True, tuple(paths), None, "stubbed valid"),
+    )
 
 
 def _game_mode_denied(*a, **kw):
@@ -130,6 +139,92 @@ def test_check_gate_fails_closed_on_vision_timeout_no_cloud_fallback(monkeypatch
     assert result["approved"] is False
     assert "Judgment failed" in result["message"]
     assert cloud_calls["n"] == 0
+
+
+def test_check_gate_evidence_invalid_short_circuits_before_judge(monkeypatch):
+    """Invalid evidence must never reach the vision model at all — this is
+    the core of the deterministic evidence-validation requirement."""
+    monkeypatch.setattr(gatekeeper, "last_verdict", lambda *a, **kw: None)
+    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "recent_verdicts", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "activity_since", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "in_discord_call", lambda: False)
+
+    save_calls = {"n": 0}
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: save_calls.__setitem__("n", save_calls["n"] + 1))
+
+    judge_calls = {"n": 0}
+
+    async def fake_judge(prompt, images):
+        judge_calls["n"] += 1
+        return '{"approved": true, "message": "should never run"}'
+
+    monkeypatch.setattr(gatekeeper, "judge_local_only", fake_judge)
+
+    result = asyncio.run(gatekeeper.check_gate("steam"))
+
+    assert judge_calls["n"] == 0, "invalid evidence must never reach the vision model"
+    assert result["approved"] is False
+    assert result["uncertain"] is True
+    assert result["reason"] == "missing_screenshot"
+    assert result["cached"] is False
+    assert save_calls["n"] == 0, "an evidence-invalid result should not be cached either"
+
+
+def test_check_gate_evidence_invalid_message_is_neutral_not_accusatory(monkeypatch):
+    monkeypatch.setattr(gatekeeper, "last_verdict", lambda *a, **kw: None)
+    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "activity_since", lambda *a, **kw: [])
+
+    result = asyncio.run(gatekeeper.check_gate("steam"))
+
+    lowered = result["message"].lower()
+    for accusatory_word in ("slack", "lazy", "caught", "procrastinat"):
+        assert accusatory_word not in lowered
+
+
+def test_check_gate_passes_only_valid_paths_to_judge(monkeypatch, tmp_path):
+    """When some screenshots are valid and others aren't, only the
+    survivors should be sent to the model."""
+    good = tmp_path / "good.png"
+    good.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 16)
+
+    monkeypatch.setattr(gatekeeper, "last_verdict", lambda *a, **kw: None)
+    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: [str(good), "/does/not/exist.png"])
+    monkeypatch.setattr(gatekeeper, "recent_verdicts", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "activity_since", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "in_discord_call", lambda: False)
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: None)
+
+    received = {}
+
+    async def fake_judge(prompt, images):
+        received["images"] = images
+        return '{"approved": true, "message": "fine"}'
+
+    monkeypatch.setattr(gatekeeper, "judge_local_only", fake_judge)
+
+    asyncio.run(gatekeeper.check_gate("steam"))
+
+    assert received["images"] == [str(good)]
+
+
+def test_react_to_verdict_treats_uncertain_as_notify_only_never_close(monkeypatch):
+    calls = {"close": 0, "notify": 0}
+    monkeypatch.setattr(gatekeeper, "_notify", lambda *a, **kw: calls.__setitem__("notify", calls["notify"] + 1))
+
+    def fake_run(cmd, *a, **kw):
+        if "close-window" in cmd:
+            calls["close"] += 1
+
+    monkeypatch.setattr(gatekeeper.subprocess, "run", fake_run)
+    monkeypatch.setattr(gatekeeper.random, "choices", lambda *a, **kw: ["close"])
+
+    verdict = {"approved": False, "uncertain": True, "message": "Can't verify.", "cached": False, "reason": "stale_screenshot"}
+    asyncio.run(gatekeeper._react_to_verdict("youtube", verdict, {"id": 1}))
+
+    assert calls["close"] == 0
+    assert calls["notify"] == 1
 
 
 def test_check_gate_fails_closed_on_coordinator_deadline_exceeded(monkeypatch):

@@ -78,13 +78,19 @@ def test_gatekeeper_check_gate_uses_judge_local_only(monkeypatch):
         calls["local_only"] += 1
         return '{"approved": true, "message": "fine"}'
 
+    from evidence import EvidenceCheck
+
     monkeypatch.setattr(gatekeeper, "judge_local_only", fake_judge_local_only)
     monkeypatch.setattr(gatekeeper, "last_verdict", lambda *a, **kw: None)
-    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: [])
+    monkeypatch.setattr(gatekeeper, "recent_screenshots", lambda *a, **kw: ["/fake/screenshot.png"])
     monkeypatch.setattr(gatekeeper, "recent_verdicts", lambda *a, **kw: [])
     monkeypatch.setattr(gatekeeper, "activity_since", lambda *a, **kw: [])
     monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: None)
     monkeypatch.setattr(gatekeeper, "in_discord_call", lambda: False)
+    monkeypatch.setattr(
+        gatekeeper, "validate_screenshots",
+        lambda paths, **kw: EvidenceCheck(True, tuple(paths), None, "stubbed valid"),
+    )
 
     result = asyncio.run(gatekeeper.check_gate("youtube"))
 

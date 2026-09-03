@@ -16,6 +16,7 @@ from config import (
 )
 from context import focused_window as _focused_window, in_discord_call
 from coordinator import Denial
+from evidence import InvalidReason, validate_screenshots
 from llm import CoordinatorDenied, judge_local_only, unload_model
 from memory import (
     activity_since, last_verdict, log_activity, prune_activity,
@@ -115,10 +116,11 @@ async def _react_to_verdict(target: str, verdict: dict, window: dict) -> None:
     if verdict["approved"]:
         return
 
-    # A game-mode resource-policy denial isn't a real judgment (no evidence
-    # was weighed) — never let it trigger the destructive "close" reaction,
-    # only a notify.
-    if target != "youtube" or verdict.get("reason") == "game_mode":
+    # A game-mode resource-policy denial or an evidence-invalid uncertain
+    # result isn't a real judgment (no evidence was weighed, or the
+    # evidence itself couldn't be trusted) — never let either trigger the
+    # destructive "close" reaction, only a notify.
+    if target != "youtube" or verdict.get("reason") == "game_mode" or verdict.get("uncertain"):
         await asyncio.to_thread(_notify, "warn", verdict["message"])
         return
 
@@ -165,10 +167,42 @@ def _summarize_verdicts(target: str) -> str:
     )
 
 
+_EVIDENCE_INVALID_MESSAGES = {
+    InvalidReason.MISSING: "No screenshot evidence right now — can't verify. Try again shortly.",
+    InvalidReason.CORRUPT: "Screenshot evidence unreadable — can't verify. Try again shortly.",
+    InvalidReason.STALE: "Screenshot evidence too old to trust — can't verify. Try again shortly.",
+    InvalidReason.EMPTY_SET: "No usable screenshot evidence — can't verify. Try again shortly.",
+    InvalidReason.TIMESTAMP_MISMATCH: "Evidence doesn't match recent activity — can't verify. Try again shortly.",
+}
+
+
+def _latest_activity_ts(window_seconds: int = 12 * 3600) -> float | None:
+    rows = activity_since(window_seconds)
+    return max((r["ts"] for r in rows), default=None)
+
+
 async def check_gate(target: str) -> dict:
     cached = last_verdict(target, GATE_TTL_SECONDS)
     if cached:
         return {"approved": bool(cached["approved"]), "message": cached["message"], "cached": True}
+
+    # Evidence validity is a deterministic, pre-inference check — moved out
+    # of model judgment entirely. Audition finding: every candidate model
+    # tested confidently guessed approve/deny on stale/missing/corrupt
+    # screenshots instead of recognizing invalid evidence as grounds for
+    # uncertainty (0.0-0.6 calibration across the board). A model never
+    # even sees evidence that fails this check, and this never claims
+    # procrastination — it's a distinct "can't verify" result, not a denial.
+    images = recent_screenshots(limit=5)
+    check = validate_screenshots(images, latest_activity_ts=_latest_activity_ts())
+    if not check.valid:
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": _EVIDENCE_INVALID_MESSAGES[check.reason],
+            "cached": False,
+            "reason": check.reason.value,
+        }
 
     prompt = GATE_PROMPT.format(
         target=target,
@@ -176,10 +210,9 @@ async def check_gate(target: str) -> dict:
         discord_status="yes" if await asyncio.to_thread(in_discord_call) else "no",
         recent_verdicts=_summarize_verdicts(target),
     )
-    images = recent_screenshots(limit=5)
 
     try:
-        raw = await judge_local_only(prompt, images)
+        raw = await judge_local_only(prompt, list(check.valid_paths))
         verdict = _parse_verdict(raw)
     except CoordinatorDenied as e:
         if e.denial == Denial.GAME_MODE:
