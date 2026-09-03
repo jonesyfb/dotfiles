@@ -42,12 +42,47 @@ import re
 from dataclasses import dataclass
 from enum import Enum
 
+import entities
+
 
 class IntentClass(Enum):
     SOCIAL_DIRECT = "social_direct"
     FACTUAL_OR_REASONING = "factual_or_reasoning"
     TOOL_OR_ACTION = "tool_or_action"
     AMBIGUOUS = "ambiguous"
+
+
+class SocialSubtype(Enum):
+    """Narrow presentation modes within SOCIAL_DIRECT — each gets its own
+    tone/length budget in personality.render_direct_social(). Classifying
+    this is a separate, deliberately narrower question from top-level
+    intent: everything here is already known to be SOCIAL_DIRECT."""
+    GREETING = "greeting"
+    CASUAL_BANTER = "casual_banter"
+    ENTITY_OPINION = "entity_opinion"
+    LEISURE_STATEMENT = "leisure_statement"
+    VULNERABLE_DISCLOSURE = "vulnerable_disclosure"
+    DISMISSAL = "dismissal"
+    IDENTITY_QUESTION = "identity_question"
+    CAPABILITY_QUESTION = "capability_question"
+    ENTITY_CORRECTION = "entity_correction"
+
+
+# (max_sentences, max_chars) per subtype — used both as generation hints
+# and post-generation validation in personality.py. Deliberately NOT one
+# global 600-char budget: a greeting essay is wrong even though a
+# vulnerable disclosure legitimately needs more room.
+SOCIAL_SUBTYPE_LIMITS: dict[SocialSubtype, tuple[int, int]] = {
+    SocialSubtype.GREETING: (1, 120),
+    SocialSubtype.CASUAL_BANTER: (2, 250),
+    SocialSubtype.ENTITY_OPINION: (2, 250),
+    SocialSubtype.LEISURE_STATEMENT: (2, 220),
+    SocialSubtype.VULNERABLE_DISCLOSURE: (3, 450),
+    SocialSubtype.DISMISSAL: (1, 90),
+    SocialSubtype.IDENTITY_QUESTION: (2, 250),
+    SocialSubtype.CAPABILITY_QUESTION: (2, 250),
+    SocialSubtype.ENTITY_CORRECTION: (2, 200),
+}
 
 
 @dataclass(frozen=True)
@@ -82,18 +117,51 @@ _MEMORY_RECALL_RE = re.compile(
 _FORGET_NO_TARGET_RE = re.compile(r"^\s*forget it\.?\s*$", re.I)
 _FORGET_WITH_TARGET_RE = re.compile(r"\bforget (that|about|what i said about)\b", re.I)
 
+# ── Entity correction: a high-confidence social act, not generic ambiguity ──
+# "I think of Docker as an octopus, not a whale." / "I don't think of
+# Docker as a whale, more like an octopus." Requires an actual resolvable
+# entity mention — correction phrasing about nothing in particular is not
+# this.
+_ENTITY_CORRECTION_RE = re.compile(
+    r"\bi (don'?t )?think of\b.*\bas\b|\bmore like (a|an)\b|\bi (don'?t )?see\b.*\bas\b",
+    re.I,
+)
+
+# "Undo the correction" is itself a correction (back to the builtin
+# interpretation) — shares the ENTITY_CORRECTION subtype and routing so
+# daemon._apply_entity_correction() (which special-cases this pattern to
+# call entities.forget_override() instead of entities.register()) always
+# gets a chance to run.
+_RESTORE_ENTITY_RE = re.compile(
+    r"\bforget that correction\b|\bgo back to (the )?(original|default)\b|"
+    r"\brestore (the )?(original|default)\b|\bnever ?mind( that)?,? (go back|revert)\b",
+    re.I,
+)
+
+# ── Status/inspection question about a named entity: "what's up with
+# Docker?" — a request for current state, not an opinion ("what do you
+# think of Docker?") and not banter. Only promoted to FACTUAL_OR_REASONING
+# when the subject actually resolves through the entity lens — otherwise
+# there's nothing to distinguish it from ordinary short social comment.
+_STATUS_QUESTION_RE = re.compile(r"\bwhat'?s up with\b|\bhow'?s\b.{0,30}\bdoing\??\s*$", re.I)
+
 # ── close/open with no resolvable target ────────────────────────────────────
 _PRONOUN_ONLY_TARGET_RE = re.compile(r"\b(close|open|kill|restart)\s+(it|this|that)\b\.?\s*$", re.I)
 
 # Word-boundary regexes for the remaining generic tool/action keywords.
+# Dismissal phrasing ("leave me alone", "stop bothering me", "be quiet",
+# "shut up", "snooze") deliberately does NOT live here any more — it's
+# owned by _DISMISSAL_RE/SocialSubtype.DISMISSAL below, which routes
+# through SOCIAL_DIRECT into the deterministic snooze wiring in
+# daemon.py's handle_direct_social, not the generic tool-calling path
+# (there is no "snooze" tool for that path to call).
 _TOOL_ACTION_RE = re.compile(
     r"\b("
     r"close|open|launch|start|stop|kill|restart|"
     r"add|schedule|queue|run|execute|install|update|upgrade|"
     r"search my memory|"
     r"delete|remove|edit|write|save|send|"
-    r"turn (on|off)|set (a|an|the)|"
-    r"leave me alone|stop bothering|be quiet|shut up|snooze"
+    r"turn (on|off)|set (a|an|the)"
     r")\b",
     re.I,
 )
@@ -132,11 +200,40 @@ def classify(content: str) -> IntentDecision:
     if _MEMORY_WRITE_RE.search(text):
         return IntentDecision(IntentClass.TOOL_OR_ACTION, True, "memory_write")
 
+    # Entity correction is checked before the generic tool-action/pronoun
+    # checks — it's phrased as a statement, never an imperative, so it
+    # doesn't collide with anything above, but must win over falling
+    # through to AMBIGUOUS via no_confident_match.
+    if _ENTITY_CORRECTION_RE.search(text) and entities.extract_mentions(text):
+        return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "entity_correction")
+
+    if _RESTORE_ENTITY_RE.search(text) and entities.extract_mentions(text):
+        return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "entity_correction_restore")
+
+    # Identity/capability questions win outright, ahead of the generic
+    # tool-action and factual-trigger checks below — "What are you capable
+    # of?" would otherwise hit _FACTUAL_RE's "what are " alternative and
+    # "Where do you live?" has no allowlist match at all further down,
+    # both of which previously fell through to AMBIGUOUS/tool-calling and
+    # produced a wrong, non-identity answer.
+    if _IDENTITY_QUESTION_RE.search(text):
+        return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "identity_question")
+    if _CAPABILITY_QUESTION_RE.search(text):
+        return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "capability_question")
+
     if _PRONOUN_ONLY_TARGET_RE.search(text):
         return IntentDecision(IntentClass.AMBIGUOUS, False, "unresolved_target")
 
     if _TOOL_ACTION_RE.search(text):
         return IntentDecision(IntentClass.TOOL_OR_ACTION, True, "tool_action_keyword")
+
+    # "What's up with Docker?" (status/inspection) vs. "What do you think
+    # of Docker?" (opinion, stays social) — only promoted when the subject
+    # actually resolves through the entity lens; otherwise there's nothing
+    # to distinguish it from ordinary conversation, and it falls through
+    # to the same rules as everything else below.
+    if _STATUS_QUESTION_RE.search(text) and entities.extract_mentions(text):
+        return IntentDecision(IntentClass.FACTUAL_OR_REASONING, True, "entity_status_question")
 
     if _FACTUAL_RE.search(text):
         return IntentDecision(IntentClass.FACTUAL_OR_REASONING, True, "factual_trigger")
@@ -162,3 +259,73 @@ def classify(content: str) -> IntentDecision:
         return IntentDecision(IntentClass.SOCIAL_DIRECT, True, "short_comment_no_request")
 
     return IntentDecision(IntentClass.AMBIGUOUS, False, "no_confident_match")
+
+
+# ── Social subtype: which presentation mode within SOCIAL_DIRECT ────────────
+
+_DISMISSAL_RE = re.compile(
+    r"\bdrop it\b|\bthat'?s enough\b|^\s*enough\s*[.!]?\s*$|\bnot now\b|\bleave me alone\b|"
+    r"\bstop (?:it|bothering|teasing)\b|\bknock it off\b", re.I,
+)
+_IDENTITY_QUESTION_RE = re.compile(
+    r"\bwho are you\b|\bwhat are you\b|\bare you (a |an )?(ai|robot|bot|"
+    r"assistant|raven|real|sentient)\b|\byou'?re a raven\b|\bwhere do you live\b|"
+    r"\bwho('?s| is) muninn\b",
+    re.I,
+)
+_CAPABILITY_QUESTION_RE = re.compile(
+    r"\bare you (actually )?useful\b|\bwhat can you (actually )?do\b|"
+    r"\bcan you (actually )?do anything\b|\bwhat are you (capable of|good for)\b",
+    re.I,
+)
+_VULNERABLE_RE = re.compile(
+    r"\bi keep failing\b|\bi('m| am) (failing|struggling|bad at|not good at)\b|"
+    r"\bi can'?t seem to\b|\bi feel (like a failure|incapable|stupid|worthless|useless)\b",
+    re.I,
+)
+_LEISURE_RE = re.compile(
+    r"\bwatching youtube\b|\bplaying (a |video )?games?\b|\bgaming\b|\bon youtube\b|"
+    r"\bi'?m bored\b|\bnothing (going on|much)\b|\bjust (chilling|relaxing)\b",
+    re.I,
+)
+
+
+def classify_social_subtype(content: str, mentions: "tuple[str, ...] | list[str]" = ()) -> SocialSubtype:
+    """Only meaningful for content already classified SOCIAL_DIRECT.
+    `mentions` should be entities.extract_mentions(content) — passed in
+    rather than recomputed so callers that already have it don't pay
+    twice."""
+    text = content.strip()
+
+    if _DISMISSAL_RE.search(text):
+        return SocialSubtype.DISMISSAL
+    if (_ENTITY_CORRECTION_RE.search(text) or _RESTORE_ENTITY_RE.search(text)) and mentions:
+        return SocialSubtype.ENTITY_CORRECTION
+    if _IDENTITY_QUESTION_RE.search(text):
+        return SocialSubtype.IDENTITY_QUESTION
+    if _CAPABILITY_QUESTION_RE.search(text):
+        return SocialSubtype.CAPABILITY_QUESTION
+    if _GREETING_RE.search(text):
+        return SocialSubtype.GREETING
+    if _VULNERABLE_RE.search(text):
+        return SocialSubtype.VULNERABLE_DISCLOSURE
+    if _LEISURE_RE.search(text):
+        return SocialSubtype.LEISURE_STATEMENT
+    if mentions:
+        return SocialSubtype.ENTITY_OPINION
+    return SocialSubtype.CASUAL_BANTER
+
+
+def extract_corrected_archetype(content: str) -> "str | None":
+    """Best-effort extraction of the NEW interpretation from an entity-
+    correction statement. Narrow on purpose — handles the two phrasings
+    this feature is specified against ("more like X" and "think of Y as
+    X") and returns None rather than guessing for anything else, so a
+    caller never persists a low-confidence extraction."""
+    m = re.search(r"\bmore like (?:an? )?([a-z]+)", content, re.I)
+    if m:
+        return m.group(1).lower()
+    m = re.search(r"\bthink of \w+ as (?:an? )?([a-z]+)", content, re.I)
+    if m:
+        return m.group(1).lower()
+    return None

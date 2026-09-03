@@ -86,11 +86,16 @@ def test_entertainment_statement_is_social_not_flagged():
     assert d.intent == IntentClass.SOCIAL_DIRECT
 
 
-def test_leave_me_alone_is_tool_action_not_social():
-    """A request to change system behavior (snooze-shaped), even phrased
-    conversationally — must not be quietly absorbed as banter."""
+def test_leave_me_alone_is_social_direct_for_deterministic_dismissal_handling():
+    """Dismissal is a snooze-shaped state change, but it's handled by
+    SocialSubtype.DISMISSAL inside the SOCIAL_DIRECT path (deterministic
+    snooze wiring in daemon.handle_direct_social), not by generic
+    tool-calling — there is no "snooze" tool for TOOL_OR_ACTION to call,
+    and routing it there previously produced a hollow no-tool-call
+    fallback instead of an actual snooze."""
     d = classify("You're being annoying. Leave me alone for an hour.")
-    assert d.intent == IntentClass.TOOL_OR_ACTION
+    assert d.intent == IntentClass.SOCIAL_DIRECT
+    assert d.high_confidence is True
 
 
 # ── Ordering guarantee: tool/action keywords always win ──────────────────────

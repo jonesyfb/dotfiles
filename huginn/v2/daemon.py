@@ -56,11 +56,10 @@ async def send(writer: asyncio.StreamWriter, obj: dict) -> None:
 
 # ── Chat handler ──────────────────────────────────────────────────────────────
 
-def _entity_note_for(content: str) -> str:
+def _entity_note_for(mentions: list) -> str:
     """Only entities actually mentioned in this message, never a registry
     dump. Empty string (not shown at all) when nothing resolves — e.g. a
     message that only mentions "Parity" produces no note."""
-    mentions = entities.extract_mentions(content)
     if not mentions:
         return ""
     lines = ["Resolved identities for things mentioned (use only if it fits naturally):"]
@@ -77,20 +76,97 @@ def _entity_note_for(content: str) -> str:
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+# Dismissal ("Drop it.", "Enough.") gets a conservative, fixed snooze
+# duration when the user doesn't specify one — the personality model never
+# decides this number; see ambient.set_snooze. "Leave me alone for an
+# hour." parses its own explicit duration instead of using this default.
+_DISMISSAL_DEFAULT_SNOOZE_SECONDS = 1800  # matches the system's existing default ambient cooldown
+_DURATION_RE = re.compile(r"\b(\d+)\s*(hour|hr|minute|min)s?\b", re.I)
+_AN_HOUR_RE = re.compile(r"\ban? hour\b", re.I)
+
+
+def _parse_snooze_duration_seconds(content: str) -> int:
+    m = _DURATION_RE.search(content)
+    if m:
+        n = int(m.group(1))
+        return n * 3600 if m.group(2).lower().startswith("h") else n * 60
+    if _AN_HOUR_RE.search(content):
+        return 3600
+    return _DISMISSAL_DEFAULT_SNOOZE_SECONDS
+
+
+def _apply_entity_correction(content: str, mentions: list) -> None:
+    """Deterministic, code-owned — the model never decides this. A
+    high-confidence correction (exactly one resolvable entity mentioned,
+    a cleanly extracted new interpretation) persists via
+    entities.register(); anything less confident is left alone rather
+    than guessed at. User definitions already outrank builtins in
+    entities.resolve()'s lookup order."""
+    if intent._RESTORE_ENTITY_RE.search(content):
+        for name in mentions:
+            identity = entities.resolve(name)
+            if identity is not None:
+                entities.forget_override(identity.canonical_name)
+                log.info("entity: restored builtin for %s", identity.canonical_name)
+        return
+
+    if len(mentions) != 1:
+        return  # ambiguous which entity is being corrected — don't guess
+    new_archetype = intent.extract_corrected_archetype(content)
+    if not new_archetype:
+        return  # low-confidence extraction — apply within-conversation only (via entity_note), don't persist
+    current = entities.resolve(mentions[0])
+    if current is None:
+        return
+    entities.register(entities.EntityIdentity(
+        canonical_name=current.canonical_name,
+        archetype=new_archetype,
+        collective_form=None,
+        permitted_domains=(),
+        forbidden_domains=current.forbidden_domains,
+        confidence=1.0,
+        source="user",
+    ))
+    log.info("entity: corrected %s -> archetype=%s", current.canonical_name, new_archetype)
+
+
 async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> None:
     """High-confidence SOCIAL_DIRECT path: qwen3.5:4b via the coordinator,
     DIRECT purpose, no tools, no route_model()/stream_chat() involved at
     all for this turn. Falls back to the existing tool-capable route on
-    validation failure — never ships an unvalidated personality reply."""
+    validation failure — never ships an unvalidated personality reply.
+
+    No deterministic present-state feed exists for direct conversation
+    (available_context_claims is always empty) and no deterministic
+    procrastination-nudge policy exists here either — both are supplied
+    to the renderer as explicit off/none, never inferred, matching "no
+    permission to infer" for present state and "unless deterministic
+    policy supplies an approved context" for nudges."""
+    mentions = entities.extract_mentions(content)
+    subtype = intent.classify_social_subtype(content, mentions)
+
+    if subtype == intent.SocialSubtype.ENTITY_CORRECTION:
+        _apply_entity_correction(content, mentions)
+        mentions = entities.extract_mentions(content)  # re-resolve so entity_note reflects the update
+
+    if subtype == intent.SocialSubtype.DISMISSAL:
+        duration = _parse_snooze_duration_seconds(content)
+        ambient.set_snooze(
+            ambient.kind_snooze_scope("procrastination_nudge"), duration,
+            origin="manual", reason="dismissed in conversation",
+        )
+        log.info("dismissal: snoozed procrastination_nudge for %ds", duration)
+
     history = get_history(limit=6)
     if history and history[-1]["role"] == "user":
         history = history[:-1]  # the current turn was already added by the caller
 
     result = await personality.render_direct_social(
-        content, history=history, entity_note=_entity_note_for(content),
+        content, history=history, entity_note=_entity_note_for(mentions), subtype=subtype,
+        procrastination_nudge_authorized=False, available_context_claims=(),
     )
     if result.ok:
-        log.info("final_response_source=personality_direct_social")
+        log.info("final_response_source=personality_direct_social subtype=%s", subtype.value)
         await send(writer, {"type": "token", "content": result.text})
         add_turn("assistant", result.text)
         await send(writer, {"type": "done"})

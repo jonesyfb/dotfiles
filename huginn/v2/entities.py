@@ -54,7 +54,7 @@ DOMAIN_VOCAB = {
 # forces the model to use the archetype in every sentence.
 _BUILTIN_IDENTITIES: dict[str, EntityIdentity] = {
     "brave": EntityIdentity(
-        canonical_name="Brave", aliases=("brave-browser",), archetype="lion",
+        canonical_name="Brave", aliases=("brave-browser", "lion"), archetype="lion",
         collective_form="a pride", permitted_domains=("predator_consumption", "territory_navigation"),
         forbidden_domains=(), source="builtin",
     ),
