@@ -76,7 +76,7 @@ def test_gatekeeper_check_gate_uses_judge_local_only(monkeypatch):
 
     async def fake_judge_local_only(prompt, images):
         calls["local_only"] += 1
-        return '{"approved": true, "message": "fine"}'
+        return '{"verdict": "approve", "confidence": 1.0, "message": "fine"}'
 
     from evidence import EvidenceCheck
 

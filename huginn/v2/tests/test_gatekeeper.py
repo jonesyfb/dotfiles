@@ -116,11 +116,13 @@ def test_game_mode_denial_never_triggers_close_reaction(monkeypatch):
 
 def test_check_gate_fails_closed_on_vision_timeout_no_cloud_fallback(monkeypatch):
     """A judge_local_only failure (deadline, preemption, or a raw exception)
-    must deny by default and must never touch _judge_claude — same
-    guarantee as any other local failure."""
+    must deny-by-uncertain (never a confident accusation) and must never
+    touch _judge_claude — same guarantee as any other local failure."""
     _stub_common(monkeypatch)
 
     cloud_calls = {"n": 0}
+    save_calls = {"n": 0}
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: save_calls.__setitem__("n", save_calls["n"] + 1))
 
     async def timing_out_judge(prompt, images):
         raise TimeoutError("gate judgment timed out")
@@ -137,8 +139,14 @@ def test_check_gate_fails_closed_on_vision_timeout_no_cloud_fallback(monkeypatch
     result = asyncio.run(gatekeeper.check_gate("steam"))
 
     assert result["approved"] is False
-    assert "Judgment failed" in result["message"]
+    assert result["uncertain"] is True
+    assert result["reason"] == "judge_error"
+    assert "couldn't verify" in result["message"].lower()
+    lowered = result["message"].lower()
+    for accusatory_word in ("slack", "lazy", "caught", "procrastinat", "judgment failed"):
+        assert accusatory_word not in lowered
     assert cloud_calls["n"] == 0
+    assert save_calls["n"] == 0, "a transient failure must not be cached as a denial"
 
 
 def test_check_gate_evidence_invalid_short_circuits_before_judge(monkeypatch):
@@ -157,7 +165,7 @@ def test_check_gate_evidence_invalid_short_circuits_before_judge(monkeypatch):
 
     async def fake_judge(prompt, images):
         judge_calls["n"] += 1
-        return '{"approved": true, "message": "should never run"}'
+        return '{"verdict": "approve", "confidence": 1.0, "message": "should never run"}'
 
     monkeypatch.setattr(gatekeeper, "judge_local_only", fake_judge)
 
@@ -200,7 +208,7 @@ def test_check_gate_passes_only_valid_paths_to_judge(monkeypatch, tmp_path):
 
     async def fake_judge(prompt, images):
         received["images"] = images
-        return '{"approved": true, "message": "fine"}'
+        return '{"verdict": "approve", "confidence": 1.0, "message": "fine"}'
 
     monkeypatch.setattr(gatekeeper, "judge_local_only", fake_judge)
 
@@ -229,8 +237,12 @@ def test_react_to_verdict_treats_uncertain_as_notify_only_never_close(monkeypatc
 
 def test_check_gate_fails_closed_on_coordinator_deadline_exceeded(monkeypatch):
     """A CoordinatorDenied that ISN'T game-mode (e.g. deadline exceeded)
-    must still deny cleanly, distinct from the game-mode message/reason."""
+    must still deny-by-uncertain cleanly, distinct from the game-mode
+    message/reason, and the machine-readable reason (not the user-facing
+    message) is where the specific denial type lives."""
     _stub_common(monkeypatch)
+    save_calls = {"n": 0}
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: save_calls.__setitem__("n", save_calls["n"] + 1))
 
     async def deadline_denied(prompt, images):
         raise CoordinatorDenied(Denial.DEADLINE_EXCEEDED, "deadline exceeded while running")
@@ -240,5 +252,79 @@ def test_check_gate_fails_closed_on_coordinator_deadline_exceeded(monkeypatch):
     result = asyncio.run(gatekeeper.check_gate("steam"))
 
     assert result["approved"] is False
-    assert result.get("reason") != "game_mode"
-    assert "deadline_exceeded" in result["message"]
+    assert result["uncertain"] is True
+    assert result["reason"] == "deadline_exceeded"
+    assert result["reason"] != "game_mode"
+    assert "couldn't verify" in result["message"].lower()
+    assert save_calls["n"] == 0
+
+
+# ── _parse_verdict: extended 3-way schema ─────────────────────────────────────
+
+def test_parse_verdict_approve():
+    result = gatekeeper._parse_verdict('{"verdict": "approve", "confidence": 0.9, "message": "earned it"}')
+    assert result == {"approved": True, "uncertain": False, "message": "earned it"}
+
+
+def test_parse_verdict_deny():
+    result = gatekeeper._parse_verdict('{"verdict": "deny", "confidence": 0.9, "message": "not earned"}')
+    assert result == {"approved": False, "uncertain": False, "message": "not earned"}
+
+
+def test_parse_verdict_uncertain():
+    result = gatekeeper._parse_verdict('{"verdict": "uncertain", "confidence": 0.3, "message": "unclear"}')
+    assert result == {"approved": False, "uncertain": True, "message": "unclear"}
+
+
+def test_parse_verdict_malformed_json_is_uncertain_not_a_denial():
+    result = gatekeeper._parse_verdict("not json at all")
+    assert result["approved"] is False
+    assert result["uncertain"] is True
+
+
+def test_parse_verdict_unrecognized_verdict_value_is_uncertain():
+    result = gatekeeper._parse_verdict('{"verdict": "maybe", "confidence": 0.5, "message": "hedge"}')
+    assert result["approved"] is False
+    assert result["uncertain"] is True
+
+
+def test_parse_verdict_missing_verdict_key_is_uncertain():
+    result = gatekeeper._parse_verdict('{"confidence": 0.5, "message": "no verdict field"}')
+    assert result["approved"] is False
+    assert result["uncertain"] is True
+
+
+def test_check_gate_caches_only_confident_verdicts_not_model_uncertain(monkeypatch):
+    """A genuine model 'uncertain' verdict (ambiguous activity, not a system
+    failure) also shouldn't be cached — re-evaluate rather than lock in a
+    low-confidence read for the full TTL."""
+    _stub_common(monkeypatch)
+    save_calls = {"n": 0}
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: save_calls.__setitem__("n", save_calls["n"] + 1))
+
+    async def uncertain_judge(prompt, images):
+        return '{"verdict": "uncertain", "confidence": 0.3, "message": "unclear activity"}'
+
+    monkeypatch.setattr(gatekeeper, "judge_local_only", uncertain_judge)
+
+    result = asyncio.run(gatekeeper.check_gate("steam"))
+
+    assert result["uncertain"] is True
+    assert save_calls["n"] == 0
+
+
+def test_check_gate_caches_a_confident_approve(monkeypatch):
+    _stub_common(monkeypatch)
+    save_calls = {"n": 0}
+    monkeypatch.setattr(gatekeeper, "save_verdict", lambda *a, **kw: save_calls.__setitem__("n", save_calls["n"] + 1))
+
+    async def confident_judge(prompt, images):
+        return '{"verdict": "approve", "confidence": 0.9, "message": "earned it"}'
+
+    monkeypatch.setattr(gatekeeper, "judge_local_only", confident_judge)
+
+    result = asyncio.run(gatekeeper.check_gate("steam"))
+
+    assert result["approved"] is True
+    assert result["uncertain"] is False
+    assert save_calls["n"] == 1

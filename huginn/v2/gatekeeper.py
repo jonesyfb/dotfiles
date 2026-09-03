@@ -226,16 +226,35 @@ async def check_gate(target: str) -> dict:
             await unload_model(MODELS["vision"]["model"])
             return {
                 "approved": False,
+                "uncertain": True,
                 "message": "Not while you're playing. Ask again after.",
                 "cached": False,
                 "reason": "game_mode",
             }
-        verdict = {"approved": False, "message": f"Judgment failed ({e.denial.value}). Denying by default."}
-    except Exception as e:
-        verdict = {"approved": False, "message": f"Judgment failed ({e}). Denying by default."}
+        # A coordinator denial (deadline/preempted/queue-full/lock-timeout)
+        # is a resource failure, not a judgment — inability to verify, never
+        # an accusation. Not cached: a transient failure shouldn't stick
+        # around as a denial for GATE_TTL_SECONDS (the old bool-only schema
+        # didn't distinguish these; this does).
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": "Couldn't verify in time. Try again shortly.",
+            "cached": False,
+            "reason": e.denial.value,
+        }
+    except Exception:
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": "Couldn't verify right now. Try again shortly.",
+            "cached": False,
+            "reason": "judge_error",
+        }
 
     verdict["message"] = _clip(verdict["message"])
-    save_verdict(target, verdict["approved"], verdict["message"])
+    if not verdict.get("uncertain"):
+        save_verdict(target, verdict["approved"], verdict["message"])
     return {**verdict, "cached": False}
 
 
@@ -251,12 +270,30 @@ def _clip(message: str) -> str:
     return message[:_MESSAGE_CAP - 1].rsplit(" ", 1)[0] + "…"
 
 
+_UNPARSEABLE_MESSAGE = "Couldn't read a clear verdict. Try again shortly."
+
+
 def _parse_verdict(raw: str) -> dict:
+    """Extended 3-way schema (verdict: approve|deny|uncertain + confidence),
+    used by qwen3.8:27b per the audition (scripts/vision_bench/schema.py —
+    this mirrors that, since production needed the same uncertain option to
+    ever be reachable). A malformed or unparseable response is itself
+    inability to verify, not a denial — it maps to uncertain=True, never a
+    confident approved=False."""
     match = re.search(r"\{.*\}", raw, re.S)
     if not match:
-        return {"approved": False, "message": raw.strip()[:300] or "No verdict returned."}
+        return {"approved": False, "uncertain": True, "message": _UNPARSEABLE_MESSAGE}
     try:
         data = json.loads(match.group(0))
-        return {"approved": bool(data.get("approved", False)), "message": str(data.get("message", ""))}
     except json.JSONDecodeError:
-        return {"approved": False, "message": raw.strip()[:300]}
+        return {"approved": False, "uncertain": True, "message": _UNPARSEABLE_MESSAGE}
+
+    verdict = data.get("verdict")
+    message = str(data.get("message", "")) or _UNPARSEABLE_MESSAGE
+    if verdict == "approve":
+        return {"approved": True, "uncertain": False, "message": message}
+    if verdict == "deny":
+        return {"approved": False, "uncertain": False, "message": message}
+    if verdict == "uncertain":
+        return {"approved": False, "uncertain": True, "message": message}
+    return {"approved": False, "uncertain": True, "message": _UNPARSEABLE_MESSAGE}

@@ -238,8 +238,9 @@ def test_model_resources_flags_contention_with_multiple_loaded(tmp_path, monkeyp
 def test_model_resources_swap_required_when_different_model_resident(tmp_path, monkeypatch):
     monkeypatch.setattr(context, "GAME_MODE_FLAG", tmp_path / "game-mode")
     interaction = context.collect_interaction()
-    loaded = [{"model": "gemma4:31b"}]  # vision resident, fast is not
-    models = context.collect_models({"qwen3.5:9b", "gemma4:31b"}, loaded)
+    vision_model = context.MODELS["vision"]["model"]
+    loaded = [{"model": vision_model}]  # vision resident, fast is not
+    models = context.collect_models({"qwen3.5:9b", vision_model}, loaded)
     resources = context.collect_model_resources(models, loaded, interaction)
     assert resources.swap_required["fast"] is True    # not resident, something else is
     assert resources.swap_required["vision"] is False  # already resident
