@@ -158,7 +158,7 @@ def test_handle_chat_routes_high_confidence_social_to_direct_path(tmp_path, monk
         await daemon.send(writer, {"type": "token", "content": "Morning to you too."})
         await daemon.send(writer, {"type": "done"})
 
-    async def fake_existing(writer, content):
+    async def fake_existing(writer, content, decision=None):
         called["existing"] = True
         await daemon.send(writer, {"type": "done"})
 
@@ -181,7 +181,7 @@ def test_handle_chat_routes_tool_action_to_existing_route(tmp_path, monkeypatch)
     async def fake_direct(writer, content):
         called["direct"] = True
 
-    async def fake_existing(writer, content):
+    async def fake_existing(writer, content, decision=None):
         called["existing"] = True
         await daemon.send(writer, {"type": "done"})
 
@@ -204,7 +204,7 @@ def test_handle_chat_routes_ambiguous_to_existing_route(tmp_path, monkeypatch):
     async def fake_direct(writer, content):
         called["direct"] = True
 
-    async def fake_existing(writer, content):
+    async def fake_existing(writer, content, decision=None):
         called["existing"] = True
         await daemon.send(writer, {"type": "done"})
 
@@ -227,7 +227,7 @@ def test_handle_direct_social_falls_back_to_existing_route_on_validation_failure
 
     called = {"existing": False}
 
-    async def fake_existing(writer, content):
+    async def fake_existing(writer, content, decision=None):
         called["existing"] = True
         await daemon.send(writer, {"type": "done"})
 
@@ -272,7 +272,7 @@ def test_game_mode_still_blocks_non_social_but_not_social(tmp_path, monkeypatch)
         social_called["n"] += 1
         await daemon.send(writer, {"type": "done"})
 
-    async def fake_existing(writer, content):
+    async def fake_existing(writer, content, decision=None):
         existing_called["n"] += 1
         await daemon.send(writer, {"type": "done"})
 

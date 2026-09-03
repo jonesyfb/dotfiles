@@ -41,8 +41,17 @@ _pending_confirms: dict[str, dict] = {}
 # ── Writer helpers ────────────────────────────────────────────────────────────
 
 async def send(writer: asyncio.StreamWriter, obj: dict) -> None:
-    writer.write((json.dumps(obj) + "\n").encode())
-    await writer.drain()
+    try:
+        writer.write((json.dumps(obj) + "\n").encode())
+        await writer.drain()
+    except (BrokenPipeError, ConnectionResetError, OSError):
+        # Client disconnected mid-response. A buffered action (see
+        # _handle_chat_via_existing_route) has already fully executed and
+        # been recorded in history by the time this fires — the truthful
+        # record survives even though this specific client won't see it;
+        # a later `recover` picks it up. Never let a gone client crash
+        # the handler mid-action.
+        log.info("client disconnected, dropping one outbound event")
 
 
 # ── Chat handler ──────────────────────────────────────────────────────────────
@@ -88,7 +97,7 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
         return
 
     log.info("direct_social fallback to existing route: reason=%s", result.reason)
-    await _handle_chat_via_existing_route(writer, content)
+    await _handle_chat_via_existing_route(writer, content, decision=None)
 
 
 async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
@@ -109,7 +118,7 @@ async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
         return
 
     add_turn("user", content)
-    await _handle_chat_via_existing_route(writer, content)
+    await _handle_chat_via_existing_route(writer, content, decision)
 
 
 _CALENDAR_WRITE_RE = re.compile(
@@ -146,15 +155,44 @@ _FAKE_TOOL_MARKUP_RE = re.compile(
 )
 
 
-async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content: str) -> None:
-    """route_model()/stream_chat()/tool-calling loop. Tool execution now
-    goes through actions.execute() (authoritative state, never a bare
-    string handed straight to a follow-up model) and a consequential
-    tool's final response is composed deterministically from that state —
-    never from a second free-form completion. Read-only tools are
-    unaffected: the model still narrates calendar_list/recall/search
-    results freely, since there's no state-change claim about those to
-    get wrong."""
+def _no_tool_call_response(decision: "intent.IntentDecision") -> str:
+    """The ONLY visible response for a TOOL_OR_ACTION/AMBIGUOUS request
+    that produced no structural tool call — whether the model's buffered
+    prose was a fake transcript, an honest clarifying question, or
+    anything else. Deliberately never inspects that prose: composed
+    entirely from our OWN upstream classification, so there is no
+    dependency on recognizing every possible fake-transcript syntax."""
+    if decision.reason == "unresolved_target":
+        return "Which one did you mean?"
+    if decision.reason == "forget_unresolved_target":
+        return "Forget what, exactly?"
+    return "No command ran — tell me exactly what you'd like done."
+
+
+async def _handle_chat_via_existing_route(
+    writer: asyncio.StreamWriter, content: str, decision: "intent.IntentDecision | None" = None,
+) -> None:
+    """route_model()/stream_chat()/tool-calling loop. Tool execution goes
+    through actions.execute() (authoritative state, never a bare string
+    handed straight to a follow-up model) and a consequential — or
+    simply non-succeeding — tool's final response is composed
+    deterministically from that state, never from a second free-form
+    completion.
+
+    For TOOL_OR_ACTION/AMBIGUOUS requests specifically, the model's prose
+    is buffered (not streamed) until the outcome is structurally known:
+    a real tool call, or none. A prior version of this defense streamed
+    first and corrected fabricated tool transcripts afterward — visible
+    exactly once, which is not acceptable. Nothing is ever shown to the
+    user for these intents that wasn't produced by a structural tool-call
+    channel or this module's own deterministic composition.
+
+    FACTUAL_OR_REASONING keeps live streaming — there is no state-change
+    claim in play to falsely imply, so there's nothing to buffer against."""
+    if decision is None:
+        decision = intent.classify(content)
+    buffer_prose = decision.intent in (intent.IntentClass.TOOL_OR_ACTION, intent.IntentClass.AMBIGUOUS)
+
     if _requests_calendar_write(content):
         log.info("final_response_source=calendar_write_unavailable_shortcut")
         response = actions.compose_calendar_write_unavailable()
@@ -164,7 +202,7 @@ async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content:
         return
 
     model_key = route_model(content)
-    log.info("route: model=%s", model_key)
+    log.info("route: model=%s buffered=%s", model_key, buffer_prose)
 
     history = get_history(limit=40)
     messages = [{"role": "system", "content": SYSTEM_PROMPT}] + history
@@ -177,135 +215,160 @@ async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content:
             await send(writer, {"type": "thinking", "content": ev["content"]})
         elif ev["type"] == "token":
             full_response += ev["content"]
-            await send(writer, {"type": "token", "content": ev["content"]})
+            if not buffer_prose:
+                await send(writer, {"type": "token", "content": ev["content"]})
         elif ev["type"] == "tool_call":
             tool_calls_made.append(ev)
         elif ev["type"] == "done":
             break
 
-    if not tool_calls_made and full_response and _FAKE_TOOL_MARKUP_RE.search(full_response):
-        # No real structured tool call happened — this is plain content
-        # that merely looks like one. Already streamed (can't unsend), so
-        # correct the record in-band rather than storing it as a genuine
-        # turn a future completion could treat as something that occurred.
-        log.info("final_response_source=fake_tool_markup_correction structured_tool_call_received=False")
-        correction = "(No tool actually ran there — I don't have one for this.)"
-        await send(writer, {"type": "token", "content": "\n\n" + correction})
-        add_turn("assistant", correction)
-        await send(writer, {"type": "done"})
-        return
-
-    # Process tool calls
-    if tool_calls_made:
-        if full_response:
-            add_turn("assistant", full_response)
-            full_response = ""
-
-        tool_results = []
-        deterministic_records: list[actions.ActionRecord] = []
-        for tc in tool_calls_made:
-            name = tc["tool"]
-            args = tc.get("args", {})
-            trust = TOOL_TRUST.get(name, "confirm")
-
-            # Shell gets extra safety check
-            if name == "shell" and shell_is_safe(args.get("command", "")):
-                trust = "auto"
-
-            if trust == "confirm":
-                record = actions.propose(name, args, trust)
-                _pending_confirms[record.action_id] = {
-                    "record": record, "writer": writer,
-                    "tool_calls": tool_calls_made, "history": get_history(40),
-                    "model_key": model_key,
-                }
-                await send(writer, {
-                    "type": "confirm_required",
-                    "id": record.action_id,
-                    "tool": name,
-                    "args": args,
-                })
-                return  # caller will resume via handle_confirm
-            else:
-                await send(writer, {"type": "tool_call", "tool": name, "args": args})
-                record = actions.propose(name, args, trust)
-                record = await actions.execute(record)
-                log.info("action: tool=%s trust=%s state=%s", name, trust, record.state.value)
-                await send(writer, {
-                    "type": "tool_result", "tool": name,
-                    "output": record.result if record.state == actions.ActionState.SUCCEEDED else (record.error or ""),
-                })
-                # Deterministic composition applies whenever the tool is
-                # state-changing OR it simply didn't cleanly succeed — a
-                # failed/unavailable/timed-out call to even a read-only
-                # tool (e.g. an unknown/hallucinated tool name) must not
-                # be handed to a free-form completion that could narrate
-                # around the failure instead of stating it. Free narration
-                # is reserved for the one safe case: a read-only tool that
-                # actually succeeded.
-                if actions.is_consequential(name) or record.state != actions.ActionState.SUCCEEDED:
-                    deterministic_records.append(record)
-                else:
-                    tool_results.append({
-                        "role": "tool",
-                        "content": record.result,
-                        "name": name,
-                    })
-
-        if deterministic_records:
-            # A state-changing (or non-succeeding) tool ran this turn —
-            # the final word comes from what actually happened, never a
-            # second free-form completion that could drift from it
-            # (observed live: a successful `remember` narrated as "Mint
-            # green" when the tool result — now fixed separately — didn't
-            # even say that).
-            log.info("final_response_source=deterministic_action_composer")
-            response = " ".join(actions.compose_response(r) for r in deterministic_records)
+    if not tool_calls_made:
+        if buffer_prose:
+            # No structural tool call — the buffered prose (if any) is
+            # never shown, never inspected, never stored. See
+            # _no_tool_call_response's docstring for why.
+            if full_response:
+                log.info(
+                    "final_response_source=suppressed_unvalidated_prose intent=%s reason=%s",
+                    decision.intent.value, decision.reason,
+                )
+            response = _no_tool_call_response(decision)
             await send(writer, {"type": "token", "content": response})
             add_turn("assistant", response)
             await send(writer, {"type": "done"})
             return
 
-        if tool_results:
-            log.info("final_response_source=model_narration_of_readonly_result")
-            # Ollama expects: assistant msg with tool_calls field, then tool result msgs
-            asst_tool_msg = {
-                "role": "assistant",
-                "content": full_response or "",
-                "tool_calls": [
-                    {"function": {"name": tc["tool"], "arguments": tc.get("args", {})}}
-                    for tc in tool_calls_made
-                ],
+        # FACTUAL_OR_REASONING: already streamed live above. Defense in
+        # depth only (see module docstring on _FAKE_TOOL_MARKUP_RE) — this
+        # branch has no buffering to fall back on, so a match here can
+        # only append a correction, not prevent the original text from
+        # having been shown.
+        if full_response and _FAKE_TOOL_MARKUP_RE.search(full_response):
+            log.info("final_response_source=fake_tool_markup_correction structured_tool_call_received=False")
+            correction = "(No tool actually ran there — I don't have one for this.)"
+            await send(writer, {"type": "token", "content": "\n\n" + correction})
+            add_turn("assistant", correction)
+            await send(writer, {"type": "done"})
+            return
+
+        if full_response:
+            add_turn("assistant", full_response)
+        await send(writer, {"type": "done"})
+        return
+
+    # A structural tool call exists from here on. Any buffered preamble
+    # text is unvalidated prose that was never shown — discard it
+    # entirely rather than storing it as if it were a genuine turn.
+    if full_response:
+        if not buffer_prose:
+            add_turn("assistant", full_response)
+        full_response = ""
+
+    tool_results: list[dict] = []
+    deterministic_records: list[actions.ActionRecord] = []
+    for tc in tool_calls_made:
+        name = tc["tool"]
+        args = tc.get("args", {})
+        trust = TOOL_TRUST.get(name, "confirm")
+
+        # Shell gets extra safety check
+        if name == "shell" and shell_is_safe(args.get("command", "")):
+            trust = "auto"
+
+        if trust == "confirm":
+            record = actions.propose(name, args, trust)
+            _pending_confirms[record.action_id] = {
+                "record": record, "writer": writer,
+                "tool_calls": tool_calls_made, "history": get_history(40),
+                "model_key": model_key,
             }
-            prior_history = get_history(40)
-            # Drop the last user turn we just added (we'll add it explicitly)
-            if prior_history and prior_history[-1]["role"] == "user":
-                prior_history = prior_history[:-1]
-            follow_messages = (
-                [{"role": "system", "content": SYSTEM_PROMPT}]
-                + prior_history
-                + [{"role": "user", "content": content}]
-                + [asst_tool_msg]
-                + [{"role": "tool", "content": r["content"]} for r in tool_results]
-            )
-            full_response = ""
-            thinking_buf = ""
+            await send(writer, {
+                "type": "confirm_required",
+                "id": record.action_id,
+                "tool": name,
+                "args": args,
+            })
+            return  # caller will resume via handle_confirm
+        else:
+            await send(writer, {"type": "tool_call", "tool": name, "args": args})
+            record = actions.propose(name, args, trust)
+            record = await actions.execute(record)
+            log.info("action: tool=%s trust=%s state=%s", name, trust, record.state.value)
+            await send(writer, {
+                "type": "tool_result", "tool": name,
+                "output": record.result if record.state == actions.ActionState.SUCCEEDED else (record.error or ""),
+            })
+            # Deterministic composition applies whenever the tool is
+            # state-changing OR it simply didn't cleanly succeed — a
+            # failed/unavailable/timed-out call to even a read-only
+            # tool (e.g. an unknown/hallucinated tool name) must not
+            # be handed to a free-form completion that could narrate
+            # around the failure instead of stating it. Free narration
+            # is reserved for the one safe case: a read-only tool that
+            # actually succeeded.
+            if actions.is_consequential(name) or record.state != actions.ActionState.SUCCEEDED:
+                deterministic_records.append(record)
+            else:
+                tool_results.append({
+                    "role": "tool",
+                    "content": record.result,
+                    "name": name,
+                })
 
-            async for ev in stream_chat(follow_messages, model_key):
-                if ev["type"] == "thinking":
-                    thinking_buf += ev["content"]
-                elif ev["type"] == "token":
-                    full_response += ev["content"]
-                    await send(writer, {"type": "token", "content": ev["content"]})
-                elif ev["type"] == "done":
-                    break
+    if deterministic_records:
+        # A state-changing (or non-succeeding) tool ran this turn —
+        # the final word comes from what actually happened, never a
+        # second free-form completion that could drift from it
+        # (observed live: a successful `remember` narrated as "Mint
+        # green" when the tool result — now fixed separately — didn't
+        # even say that).
+        log.info("final_response_source=deterministic_action_composer")
+        response = " ".join(actions.compose_response(r) for r in deterministic_records)
+        await send(writer, {"type": "token", "content": response})
+        add_turn("assistant", response)
+        await send(writer, {"type": "done"})
+        return
 
-            # If the model put its entire response in thinking, surface the last sentence
-            if not full_response and thinking_buf:
-                last = thinking_buf.rstrip().rsplit("\n", 1)[-1].strip()
-                if last:
-                    await send(writer, {"type": "token", "content": last})
-                    full_response = last
+    if tool_results:
+        log.info("final_response_source=model_narration_of_readonly_result")
+        # Ollama expects: assistant msg with tool_calls field, then tool result msgs
+        asst_tool_msg = {
+            "role": "assistant",
+            "content": full_response or "",
+            "tool_calls": [
+                {"function": {"name": tc["tool"], "arguments": tc.get("args", {})}}
+                for tc in tool_calls_made
+            ],
+        }
+        prior_history = get_history(40)
+        # Drop the last user turn we just added (we'll add it explicitly)
+        if prior_history and prior_history[-1]["role"] == "user":
+            prior_history = prior_history[:-1]
+        follow_messages = (
+            [{"role": "system", "content": SYSTEM_PROMPT}]
+            + prior_history
+            + [{"role": "user", "content": content}]
+            + [asst_tool_msg]
+            + [{"role": "tool", "content": r["content"]} for r in tool_results]
+        )
+        full_response = ""
+        thinking_buf = ""
+
+        async for ev in stream_chat(follow_messages, model_key):
+            if ev["type"] == "thinking":
+                thinking_buf += ev["content"]
+            elif ev["type"] == "token":
+                full_response += ev["content"]
+                await send(writer, {"type": "token", "content": ev["content"]})
+            elif ev["type"] == "done":
+                break
+
+        # If the model put its entire response in thinking, surface the last sentence
+        if not full_response and thinking_buf:
+            last = thinking_buf.rstrip().rsplit("\n", 1)[-1].strip()
+            if last:
+                await send(writer, {"type": "token", "content": last})
+                full_response = last
 
     if full_response:
         add_turn("assistant", full_response)
