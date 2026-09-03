@@ -339,7 +339,7 @@ async def unload_model(model: str) -> None:
             return
 
 
-async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
+async def _render_personality_raw(system_prompt: str, user_prompt: str, max_tokens: "int | None" = None) -> str:
     """Raw primitive — no lock, no coordinator routing, no cloud path
     anywhere in this function. Use render_personality_only() instead.
 
@@ -348,7 +348,16 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
     answer with thinking left on (matching Garage Watch's own qwen3.5 usage,
     which already disables it for the same reason). With it off: ~0.3s,
     24 tokens, same voice quality. This is the difference between a snappy
-    ambient renderer and one that blows the deadline on every single call."""
+    ambient renderer and one that blows the deadline on every single call.
+
+    `max_tokens` (Ollama's `num_predict`) is a generation-time budget, not a
+    substitute for post-generation validation — it stops an over-long reply
+    from ever being fully generated, but a model can still ignore length
+    guidance within that budget, which is what the caller's validator is
+    for."""
+    options = {"temperature": 0.7}
+    if max_tokens is not None:
+        options["num_predict"] = max_tokens
     payload = {
         "model": MODELS["personality"]["model"],
         "messages": [
@@ -357,7 +366,7 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str) -> str:
         ],
         "stream": False,
         "think": False,
-        "options": {"temperature": 0.7},
+        "options": options,
     }
     async with httpx.AsyncClient(timeout=PERSONALITY_RENDER_TIMEOUT_SECONDS) as client:
         r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
@@ -370,6 +379,7 @@ async def render_personality_only(
     user_prompt: str,
     purpose: Purpose = Purpose.AMBIENT,
     deadline_seconds: "float | None" = None,
+    max_tokens: "int | None" = None,
 ) -> str:
     """Structurally cloud-isolated, like judge_local_only — no `prefer`
     argument and no code path to _judge_claude/stream_claude anywhere in
@@ -380,7 +390,7 @@ async def render_personality_only(
     on denial so callers keep the same except-and-handle shape used
     elsewhere (judge_local_only, unload_model)."""
     async def _fn(emit):
-        return await _render_personality_raw(system_prompt, user_prompt)
+        return await _render_personality_raw(system_prompt, user_prompt, max_tokens=max_tokens)
 
     request = InferenceRequest(
         request_class=RequestClass.RESIDENT_PERSONALITY,

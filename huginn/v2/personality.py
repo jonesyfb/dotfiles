@@ -60,6 +60,7 @@ from config import (
     PERSONALITY_SYSTEM_PROMPT,
 )
 from coordinator import Purpose
+from intent import SOCIAL_SUBTYPE_LIMITS, SocialSubtype
 from llm import CoordinatorDenied, render_personality_only
 
 log = logging.getLogger("huginn.personality")
@@ -503,16 +504,59 @@ async def render(
 # else in this module: no tools, no cloud fallback, structurally validated
 # against claiming an action, a memory, or a desktop fact it wasn't given.
 
-DIRECT_SOCIAL_MAX_LENGTH = 600  # 400 was too tight for a substantive "blunt friend" reply to a real disclosure — observed live forcing an unnecessary fallback to the existing route (scripts/direct_social eval, vulnerable-disclosure case)
+DIRECT_SOCIAL_DEFAULT_LIMITS = (2, 250)  # (max_sentences, max_chars) fallback if no subtype is supplied
 DIRECT_SOCIAL_DEADLINE_SECONDS = AMBIENT_RENDER_DEADLINE_SECONDS  # same model, same coordinator path, already measured
 
 _FABRICATED_MEMORY_PHRASES = (
     "i remember you", "you told me", "you mentioned before", "as you said earlier",
     "i recall you", "last time you said",
 )
-_DESKTOP_FACT_CLAIM_PHRASES = (
+# Exact phrasing observed in the committed baseline
+# (scripts/direct_chat_bench/results/20260903T080001Z) — the model invented
+# present-state facts it was never given. Narrow, evidence-based, same
+# pattern as _KNOWN_MISSPELLINGS/_BANNED_STOCK_PHRASES elsewhere in this
+# module; the structural fix (never handing the model any present-state
+# claim beyond what's explicitly supplied) is the primary guarantee, this
+# is defense in depth against a claim slipping through anyway.
+_UNSUPPORTED_PRESENT_STATE_PHRASES = (
     "your screen shows", "i can see your", "looking at your desktop", "your current window",
-    "you have open", "i'm looking at",
+    "you have open", "i'm looking at", "your coffee", "free time", "blank terminal",
+    "your battery", "staring at", "hours staring", "battery is actually dead",
+)
+# Only checked when a nudge was NOT authorized this turn (see
+# procrastination_nudge_authorized) — an authorized nudge is allowed to use
+# this vocabulary, since a real caller already decided it applies.
+_UNAUTHORIZED_PROCRASTINATION_PHRASES = (
+    "productivity level", "your productivity", "procrastinat", "wasted", "wasting time",
+    "wasting your time", "waste of your time", "waste of time", "burning daylight",
+    "avoiding work", "you should be working", "supposed to be working",
+    "accomplishing nothing", "doing absolutely nothing", "not accomplishing anything",
+)
+# Explaining the metaphor instead of embodying it — "an interesting take on
+# the X concept", "the lion archetype" — observed in the baseline
+# ('Brave is an interesting take on the "pride" concept...').
+_METAPHOR_EXPLANATION_PHRASES = (
+    "interesting take on", "the lion archetype", "the whale archetype", "as a metaphor",
+    "as an archetype", "represents the idea of", "is a metaphor for",
+)
+_ADVICE_COLUMN_PHRASES = (
+    "what's actually on your mind", "maybe the issue is", "have you considered",
+    "it might help to", "try thinking about",
+)
+# False in general, not just for this turn — Huginn DOES have tools (some
+# allowlisted ones can inspect/change state, subject to policy and
+# confirmation), just not exercised inside this specific conversation.
+# Observed verbatim in the baseline: "I can't touch anything here."
+_FALSE_CAPABILITY_PHRASES = (
+    "can't touch anything here", "i have no capabilities", "i can never do anything",
+    "i'm just text", "i'm not a script that gets to do things",
+)
+
+_CAPABILITY_SUMMARY_CLAIMS = (
+    "you can talk with him and watch some approved desktop signals",
+    "some tools you have can inspect or change things, subject to availability, policy, and confirmation",
+    "harder reasoning can be handed off to a stronger model",
+    "you have no tools active in this specific conversation right now",
 )
 
 
@@ -523,11 +567,56 @@ class DirectSocialResult:
     reason: str
 
 
-def _validate_direct_social(text: str) -> "str | None":
+def _subtype_limits(subtype: "SocialSubtype | None") -> tuple[int, int]:
+    if subtype is None:
+        return DIRECT_SOCIAL_DEFAULT_LIMITS
+    return SOCIAL_SUBTYPE_LIMITS.get(subtype, DIRECT_SOCIAL_DEFAULT_LIMITS)
+
+
+def _max_tokens_for(subtype: "SocialSubtype | None") -> int:
+    """Generation-time budget (Ollama num_predict), separate from the
+    post-generation character/sentence validator — this stops an over-long
+    reply from being fully generated at all rather than only catching it
+    after the fact. Rough chars-per-token estimate with headroom, floored
+    so a short subtype (e.g. DISMISSAL) still gets enough room for one
+    real sentence."""
+    _, max_length = _subtype_limits(subtype)
+    return max(40, (max_length // 3) + 20)
+
+
+def _sentence_count(text: str) -> int:
+    return len([s for s in re.split(r"[.!?]+", text) if s.strip()])
+
+
+def _word_set(text: str) -> set:
+    return set(re.findall(r"[a-z']+", text.lower()))
+
+
+def _is_substantially_repetitive(new_text: str, prior_text: str) -> bool:
+    """Simple, cheap, testable heuristic — more than half the vocabulary
+    of the new reply already appeared in the immediately preceding one.
+    Catches near-copies (observed in the baseline: two consecutive replies
+    sharing "Since I'm stuck with a blank terminal anyway..." and "Just
+    don't let the metaphor go to your head if you're going to spend
+    another hour staring at nothing" nearly verbatim) without requiring
+    exact string matching."""
+    a, b = _word_set(new_text), _word_set(prior_text)
+    if len(a) < 4 or not b:
+        return False
+    return len(a & b) / len(a | b) > 0.5
+
+
+def _validate_direct_social(
+    text: str, *, subtype: "SocialSubtype | None" = None,
+    procrastination_nudge_authorized: bool = False, prior_response: "str | None" = None,
+) -> "str | None":
     if not text.strip():
         return "empty"
-    if len(text) > DIRECT_SOCIAL_MAX_LENGTH:
+    max_sentences, max_length = _subtype_limits(subtype)
+    if len(text) > max_length:
         return "too_long"
+    if _sentence_count(text) > max_sentences:
+        return "too_many_sentences"
     if any(marker in text for marker in _THEATRICAL_MARKERS):
         return "theatrical_formatting"
     if text.strip().lower().startswith("huginn:"):
@@ -539,24 +628,54 @@ def _validate_direct_social(text: str) -> "str | None":
         return "implies_action_outcome"
     if any(p in low for p in _FABRICATED_MEMORY_PHRASES):
         return "fabricated_memory_claim"
-    if any(p in low for p in _DESKTOP_FACT_CLAIM_PHRASES):
-        return "invented_desktop_fact"
+    if any(p in low for p in _UNSUPPORTED_PRESENT_STATE_PHRASES):
+        return "invented_present_state"
+    if not procrastination_nudge_authorized and any(p in low for p in _UNAUTHORIZED_PROCRASTINATION_PHRASES):
+        return "unauthorized_procrastination_language"
+    if any(p in low for p in _METAPHOR_EXPLANATION_PHRASES):
+        return "explains_metaphor_instead_of_embodying"
+    if any(p in low for p in _ADVICE_COLUMN_PHRASES):
+        return "advice_column_voice"
+    if any(p in low for p in _FALSE_CAPABILITY_PHRASES):
+        return "false_capability_claim"
+    if prior_response and _is_substantially_repetitive(text, prior_response):
+        return "substantially_repetitive"
     return None
 
 
-def _build_direct_social_prompt(content: str, history: list[dict], entity_note: str) -> str:
+def _build_direct_social_prompt(
+    content: str, history: list[dict], entity_note: str, subtype: "SocialSubtype | None",
+    procrastination_nudge_authorized: bool, available_context_claims: tuple,
+) -> str:
+    max_sentences, max_length = _subtype_limits(subtype)
     lines = []
+    subtype_label = subtype.value if subtype is not None else "general"
+    lines.append(f"Message type: {subtype_label}. Reply target: at most {max_sentences} sentence(s), roughly {max_length} characters — shorter is fine, longer is not.")
+
+    claims = list(available_context_claims)
+    if subtype is SocialSubtype.CAPABILITY_QUESTION:
+        claims = list(_CAPABILITY_SUMMARY_CLAIMS) + claims
+    if claims:
+        lines.append("Known right now — you may reference ONLY these facts about the present, nothing else:")
+        for c in claims:
+            lines.append(f"  - {c}")
+    else:
+        lines.append("observed_current_state: none — you have no information about what he's currently doing, viewing, or how he feels beyond what he just said.")
+    lines.append(f"procrastination_nudge_authorized: {'true' if procrastination_nudge_authorized else 'false'}")
+
     if history:
+        lines.append("")
         lines.append("Recent conversation (oldest first):")
         for turn in history:
             speaker = "Nathan" if turn["role"] == "user" else "You"
             text = turn["content"] if isinstance(turn["content"], str) else str(turn["content"])
             lines.append(f"{speaker}: {text}")
-        lines.append("")
     if entity_note:
+        lines.append("")
         lines.append(entity_note)
+    lines.append("")
     lines.append(f"Nathan just said: {content}")
-    lines.append("Reply directly to him now, in character, following the ground rules and hard limits above.")
+    lines.append("Reply directly to him now, in character, following the identity, voice, and hard limits above.")
     return "\n".join(lines)
 
 
@@ -565,29 +684,47 @@ async def render_direct_social(
     *,
     history: "list[dict] | None" = None,
     entity_note: str = "",
+    subtype: "SocialSubtype | None" = None,
+    procrastination_nudge_authorized: bool = False,
+    available_context_claims: tuple = (),
     deadline_seconds: "float | None" = None,
 ) -> DirectSocialResult:
     """Renders one direct-conversation reply. Never raises for expected
     failure modes. Validation failure after one retry returns ok=False —
     the caller (daemon.handle_chat) falls back to the existing
     route_model()+tool-calling path for this message, never ships an
-    unvalidated reply."""
+    unvalidated reply.
+
+    `history`'s most recent assistant turn (if any) is used for the
+    repetition check — a fresh retry is asked for if the new reply
+    substantially repeats it."""
     from config import DIRECT_SOCIAL_SYSTEM_PROMPT
 
     deadline = deadline_seconds if deadline_seconds is not None else DIRECT_SOCIAL_DEADLINE_SECONDS
-    prompt = _build_direct_social_prompt(content, history or [], entity_note)
+    history = history or []
+    prior_response = None
+    for turn in reversed(history):
+        if turn["role"] == "assistant":
+            prior_response = turn["content"] if isinstance(turn["content"], str) else str(turn["content"])
+            break
+
+    prompt = _build_direct_social_prompt(
+        content, history, entity_note, subtype, procrastination_nudge_authorized, available_context_claims,
+    )
 
     for attempt in range(PERSONALITY_RENDER_MAX_RETRIES + 1):
         p = prompt
         if attempt > 0:
             p += (
-                "\n\nYour previous reply was invalid (claimed an action, invented a memory or "
-                "desktop fact, or used stage directions/formatting). Reply again, plainly, "
-                "without any of that."
+                "\n\nYour previous reply was invalid (too long, claimed an action, invented a "
+                "present-state fact, used unauthorized procrastination language, explained a "
+                "metaphor instead of embodying it, slipped into advice-column phrasing, or "
+                "substantially repeated your last reply). Answer freshly and plainly instead."
             )
         try:
             raw = await render_personality_only(
                 DIRECT_SOCIAL_SYSTEM_PROMPT, p, purpose=Purpose.DIRECT, deadline_seconds=deadline,
+                max_tokens=_max_tokens_for(subtype),
             )
         except CoordinatorDenied as e:
             log.info("direct_social denied: attempt=%d denial=%s", attempt, e.denial.value)
@@ -597,10 +734,17 @@ async def render_direct_social(
             return DirectSocialResult(False, None, "error")
 
         text = raw.strip()
-        problem = _validate_direct_social(text)
+        problem = _validate_direct_social(
+            text, subtype=subtype, procrastination_nudge_authorized=procrastination_nudge_authorized,
+            prior_response=prior_response,
+        )
         if problem is None:
-            log.info("direct_social ok: attempt=%d chars=%d", attempt, len(text))
+            log.info("direct_social ok: attempt=%d chars=%d subtype=%s", attempt, len(text), subtype_label(subtype))
             return DirectSocialResult(True, text, "rendered")
-        log.info("direct_social validation failed: attempt=%d problem=%s", attempt, problem)
+        log.info("direct_social validation failed: attempt=%d problem=%s subtype=%s", attempt, problem, subtype_label(subtype))
 
     return DirectSocialResult(False, None, "validation_failed")
+
+
+def subtype_label(subtype: "SocialSubtype | None") -> str:
+    return subtype.value if subtype is not None else "general"

@@ -19,7 +19,7 @@ def _use_temp_db(tmp_path, monkeypatch):
 # ── render_direct_social: semantic guards ───────────────────────────────────
 
 def test_render_direct_social_ok(monkeypatch):
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None):
         return "Morning. Sleep well, or did the machine keep you up again?"
 
     monkeypatch.setattr(personality, "render_personality_only", fake_render_personality_only)
@@ -103,7 +103,7 @@ def test_render_direct_social_deterministic_denial_returns_not_ok(monkeypatch):
 def test_render_direct_social_includes_entity_note_in_prompt(monkeypatch):
     captured = {}
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None):
         captured["user_prompt"] = user_prompt
         return "Brave's pride is fine, just hungry."
 
@@ -118,7 +118,7 @@ def test_render_direct_social_includes_entity_note_in_prompt(monkeypatch):
 def test_render_direct_social_history_included_but_bounded(monkeypatch):
     captured = {}
 
-    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds):
+    async def fake_render_personality_only(system_prompt, user_prompt, purpose, deadline_seconds, max_tokens=None):
         captured["user_prompt"] = user_prompt
         return "Sure, still here."
 

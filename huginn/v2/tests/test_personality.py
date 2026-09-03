@@ -620,7 +620,7 @@ def _reset_coordinator():
 def test_render_personality_only_admitted_during_game_mode(monkeypatch):
     coordinator.set_game_mode_check(lambda: True)
 
-    async def fake_raw(system_prompt, user_prompt):
+    async def fake_raw(system_prompt, user_prompt, max_tokens=None):
         return "Still here, even mid-game."
 
     monkeypatch.setattr(llm, "_render_personality_raw", fake_raw)
