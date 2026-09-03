@@ -10,6 +10,7 @@ functions callers should actually use.
 """
 import asyncio
 import json
+import logging
 import re
 from pathlib import Path
 from typing import AsyncIterator
@@ -21,6 +22,57 @@ from config import (
     PERSONALITY_RENDER_TIMEOUT_SECONDS, SYSTEM_PROMPT,
 )
 from coordinator import Denial, InferenceRequest, Purpose, RequestClass, coordinator
+
+log = logging.getLogger("huginn.llm")
+
+# Aligned with the vision-model benchmark that qwen3.8:27b was chosen
+# against (scripts/vision_bench) — temperature/num_ctx match what the
+# audition actually validated, and think:false avoids burning the same
+# hidden-reasoning tax measured for qwen3.5:4b's personality renders
+# (llm._render_personality_raw). No seed here: the benchmark pins one for
+# reproducibility across audition trials, but production has no
+# demonstrated need for deterministic output.
+GATE_JUDGE_OPTIONS = {"temperature": 0.1, "num_ctx": 8192}
+
+
+class OllamaInvalidRequest(Exception):
+    """Raised when Ollama's /api/chat returns HTTP 400 for a gate-judge
+    request — a malformed request (e.g. evidence exceeding the model's
+    context window), not a backend/network failure. Carries only the
+    status code and a parsed category/detail string, never the prompt or
+    image payload that produced it."""
+
+    def __init__(self, status_code: int, category: str, detail: str):
+        super().__init__(f"ollama HTTP {status_code} ({category}): {detail}")
+        self.status_code = status_code
+        self.category = category
+        self.detail = detail
+
+
+def _parse_ollama_error_body(text: str) -> "tuple[str, str]":
+    """Best-effort (category, detail) extraction from Ollama's error body.
+    Observed live: the body is double-JSON-encoded — a top-level {"error":
+    "<json string>"} whose decoded value is itself {"error": {"code":...,
+    "type":..., "message":...}}. Never raises; worst case returns
+    ("unknown", a truncated raw-body prefix)."""
+    try:
+        node = json.loads(text)
+    except json.JSONDecodeError:
+        return ("unknown", text[:200])
+    for _ in range(3):
+        if isinstance(node, dict) and isinstance(node.get("error"), str):
+            try:
+                node = json.loads(node["error"])
+                continue
+            except json.JSONDecodeError:
+                return ("unknown", node["error"][:200])
+        if isinstance(node, dict) and isinstance(node.get("error"), dict):
+            node = node["error"]
+            continue
+        break
+    if isinstance(node, dict):
+        return (str(node.get("type", "unknown")), str(node.get("message", ""))[:200])
+    return ("unknown", str(node)[:200])
 
 
 class CoordinatorDenied(Exception):
@@ -287,12 +339,24 @@ async def _judge_ollama(prompt: str, image_paths: list[str]) -> str:
         "model": MODELS["vision"]["model"],
         "messages": [message],
         "stream": False,
+        "think": False,
+        "options": GATE_JUDGE_OPTIONS,
     }
     # No lock here — the coordinator holds the shared flock around this call
     # (see judge_local_only above and coordinator._run_item). This function
     # is a raw primitive now, not a public entry point.
     async with httpx.AsyncClient(timeout=GATE_JUDGE_TIMEOUT_SECONDS) as client:
         r = await client.post(f"{OLLAMA_BASE}/api/chat", json=payload)
+        if r.status_code == 400:
+            # A 400 is a malformed-request problem (observed root cause:
+            # evidence exceeding num_ctx), not a backend/network failure —
+            # log status + category/detail only, never the prompt/images.
+            category, detail = _parse_ollama_error_body(r.text)
+            log.warning(
+                "gate judge got HTTP 400 from Ollama: category=%s detail=%s image_count=%d",
+                category, detail, len(images_b64),
+            )
+            raise OllamaInvalidRequest(400, category, detail)
         r.raise_for_status()
         return r.json().get("message", {}).get("content", "")
 

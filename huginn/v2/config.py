@@ -1,22 +1,48 @@
 import os
 from pathlib import Path
 
-DATA_DIR       = Path.home() / ".local/share/huginn"
-SOCKET_PATH    = DATA_DIR / "huginn.sock"
-DB_PATH        = DATA_DIR / "huginn_v2.db"
-CHIME_LOG      = DATA_DIR / "chime.log"
+DATA_DIR = Path.home() / ".local/share/huginn"
+SOCKET_PATH = DATA_DIR / "huginn.sock"
+DB_PATH = DATA_DIR / "huginn_v2.db"
+CHIME_LOG = DATA_DIR / "chime.log"
 GAME_MODE_FLAG = DATA_DIR / "game-mode"
-SCREENS_DIR    = DATA_DIR / "screens"
+SCREENS_DIR = DATA_DIR / "screens"
 
 # ── Gatekeeper ──────────────────────────────────────────────────────────────
-EDITOR_APPS          = {"zed", "kitty", "code", "code-oss", "jetbrains-studio", "nvim"}
-BROWSER_APPS         = {"brave-browser", "firefox", "chromium", "google-chrome"}
-SCREENSHOT_INTERVAL  = 600     # seconds between screenshots while an editor is focused
-SCREENSHOT_KEEP      = 8       # rolling buffer size
-ACTIVITY_POLL        = 30      # seconds between window-focus polls
-GATE_TTL_SECONDS            = 600  # cache a verdict this long before re-judging
-YOUTUBE_GRACE_SECONDS       = 90   # continuous YouTube focus before it counts as recreational
-STEAM_BYPASS_GRACE_SECONDS  = 60   # continuous Steam/game focus before checking for a bypass
+EDITOR_APPS = {"zed", "kitty", "code", "code-oss", "jetbrains-studio", "nvim"}
+BROWSER_APPS = {"brave-browser", "firefox", "chromium", "google-chrome"}
+SCREENSHOT_INTERVAL = 600  # seconds between screenshots while an editor is focused
+SCREENSHOT_KEEP = 8  # rolling buffer size
+ACTIVITY_POLL = 30  # seconds between window-focus polls
+GATE_TTL_SECONDS = 600  # cache a verdict this long before re-judging
+YOUTUBE_GRACE_SECONDS = 90  # continuous YouTube focus before it counts as recreational
+STEAM_BYPASS_GRACE_SECONDS = (
+    60  # continuous Steam/game focus before checking for a bypass
+)
+
+# On every uncached gate check, capture.capture_fresh_on_demand() grabs a
+# fresh full-desktop screenshot regardless of what's focused — this is what
+# fixes the timestamp-mismatch race (a gate check no longer depends on
+# whatever the periodic editor-only screenshot_worker happened to grab up
+# to SCREENSHOT_INTERVAL ago). MAX_HISTORICAL_SCREENSHOTS bounds how many
+# older screenshots ride along for trend context (gatekeeper._bounded_evidence_paths).
+MAX_HISTORICAL_SCREENSHOTS = 2
+GRIM_TIMEOUT_SECONDS = 10  # subprocess-level backstop on a single grim invocation
+CAPTURE_LOCK_TIMEOUT_SECONDS = 5.0  # bound on scheduling an on-demand capture, not on grim itself
+
+# Deterministic local resize applied to evidence before it reaches the
+# vision model (capture.ensure_resized) — never touches the original file.
+# Measured live against the real qwen3.8:27b server on 2026-09-03: native
+# desktop screenshots on this box are 2560x2040 and cost ~4100 Ollama
+# prompt tokens EACH — 3 of them alone (12219 tokens) exceed the whole
+# 8192-token context window before the prompt text is even counted (this
+# was the root cause of the production-only HTTP 400: up to 5 full-res
+# screenshots were being sent with no resizing at all). Resized to 1024px
+# on the long edge, 3 images measured ~2576 tokens total (~860/image) —
+# comfortable headroom under 8192 alongside the GATE_PROMPT text and
+# generation. Chosen after also measuring 1280/768/512; 1024 was the
+# smallest size that didn't visibly degrade text legibility in spot checks.
+EVIDENCE_RESIZE_MAX_DIM = 1024
 
 # httpx-level backstop inside llm._judge_ollama. The coordinator's own
 # GATE_QUEUE_DEADLINE_SECONDS (below) is the real end-to-end bound now
@@ -31,7 +57,7 @@ GATE_JUDGE_TIMEOUT_SECONDS = 120
 # instead of blocking indefinitely, so a deadline is honorable even while
 # Garage Watch holds the real OS lock.
 LOCK_POLL_INITIAL_SECONDS = 0.05
-LOCK_POLL_MAX_SECONDS     = 1.0
+LOCK_POLL_MAX_SECONDS = 1.0
 
 # Only GATE_DECISION ages toward foreground priority while queued (so it
 # can't be starved forever by continuous chat) — every this-many-seconds
@@ -43,7 +69,7 @@ GATE_DECISION_AGING_INTERVAL_SECONDS = 15
 
 # Ambient/maintenance work is disposable: if not served within this window,
 # drop it rather than let it age into relevance it no longer has.
-AMBIENT_MAX_QUEUE_SECONDS     = 60
+AMBIENT_MAX_QUEUE_SECONDS = 60
 MAINTENANCE_MAX_QUEUE_SECONDS = 300
 
 # Total end-to-end deadline for a gate decision: queue wait + run, combined.
@@ -52,15 +78,17 @@ MAINTENANCE_MAX_QUEUE_SECONDS = 300
 # warm p95 was ~15.7s, cold ~18.7s — 30s leaves real margin over both while
 # still failing closed well before a wait feels broken. Revisit if a future
 # candidate's latency profile doesn't fit this.
-GATE_QUEUE_DEADLINE_SECONDS = 30
+GATE_QUEUE_DEADLINE_SECONDS = 45
 
-COORDINATOR_MAX_QUEUE_DEPTH = 20    # bounded queueing
-GAME_MODE_POLL_SECONDS      = 1.0   # how often a running non-personality item is re-checked against game mode
+COORDINATOR_MAX_QUEUE_DEPTH = 20  # bounded queueing
+GAME_MODE_POLL_SECONDS = (
+    1.0  # how often a running non-personality item is re-checked against game mode
+)
 
 # ── Ambient interruption policy ──────────────────────────────────────────────
-AMBIENT_COOLDOWN_SECONDS = 1800     # min gap between ambient events of the same kind
-AMBIENT_DAILY_BUDGET     = 8        # max ambient events of the same kind per rolling 24h
-AMBIENT_DEDUP_WINDOW     = 21600    # don't repeat near-identical text within this window (6h)
+AMBIENT_COOLDOWN_SECONDS = 1800  # min gap between ambient events of the same kind
+AMBIENT_DAILY_BUDGET = 8  # max ambient events of the same kind per rolling 24h
+AMBIENT_DEDUP_WINDOW = 21600  # don't repeat near-identical text within this window (6h)
 
 # ── Personality renderer ──────────────────────────────────────────────────────
 # Coordinator-level deadline (queue wait + run, combined) for a qwen3.5:4b
@@ -109,12 +137,25 @@ _OLLAMA_LOCK_PATH = "/tmp/ollama.lock"
 # growth — moot anyway under OLLAMA_MAX_LOADED_MODELS=1, neither of which
 # this slice changes.
 MODELS: dict[str, dict] = {
-    "fast":         {"backend": "ollama", "model": "qwen3.5:9b",       "label": "qwen3.5 9b"},
-    "full":         {"backend": "ollama", "model": "qwen3.5:27b",      "label": "qwen3.5 27b"},
-    "code":         {"backend": "ollama", "model": "deepseek-r1:32b",  "label": "deepseek r1", "no_tools": True},
-    "vision":       {"backend": "ollama", "model": "qwen3.8:27b",      "label": "qwen3.8 27b"},
-    "cloud":        {"backend": "claude", "model": "claude-sonnet-4-6","label": "claude sonnet"},
-    "personality":  {"backend": "ollama", "model": "qwen3.5:4b",       "label": "qwen3.5 4b (personality)"},
+    "fast": {"backend": "ollama", "model": "qwen3.5:9b", "label": "qwen3.5 9b"},
+    "full": {"backend": "ollama", "model": "qwen3.5:27b", "label": "qwen3.5 27b"},
+    "code": {
+        "backend": "ollama",
+        "model": "deepseek-r1:32b",
+        "label": "deepseek r1",
+        "no_tools": True,
+    },
+    "vision": {"backend": "ollama", "model": "qwen3.8:27b", "label": "qwen3.8 27b"},
+    "cloud": {
+        "backend": "claude",
+        "model": "claude-sonnet-4-6",
+        "label": "claude sonnet",
+    },
+    "personality": {
+        "backend": "ollama",
+        "model": "qwen3.5:4b",
+        "label": "qwen3.5 4b (personality)",
+    },
     # Normal (non-game-mode) SOCIAL_DIRECT model — see the blind audition at
     # scripts/conversation_bench/results/20260903T171724Z/: best practical
     # balance of conversational ability, latency (1.48s cold, 0.66s warm
@@ -123,7 +164,11 @@ MODELS: dict[str, dict] = {
     # matches the exact tag "fast" already uses, kept as its own key since
     # the two serve different purposes (tool-calling reasoning vs. narrow
     # conversational rendering) and may diverge after a future audition.
-    "direct_social": {"backend": "ollama", "model": "qwen3.5:9b",      "label": "qwen3.5 9b (direct-social)"},
+    "direct_social": {
+        "backend": "ollama",
+        "model": "qwen3.5:9b",
+        "label": "qwen3.5 9b (direct-social)",
+    },
 }
 
 # Key into MODELS naming Huginn's resident personality/wrapper model — the
@@ -151,8 +196,10 @@ GAME_MODE_DIRECT_SOCIAL_MODEL_KEY = PERSONALITY_MODEL_KEY
 # point it at $HOME or another project via the `cwd` arg.
 CLAUDE_CODE_ALLOWED_ROOTS = [Path.home() / "dotfiles"]
 
-CALDAV_URL      = "https://calendar.poopenfarten.com/nate/3a375a1d-cea8-6085-146d-5aeb97d0480d/"
-CALDAV_USER     = "nate"
+CALDAV_URL = (
+    "https://calendar.poopenfarten.com/nate/3a375a1d-cea8-6085-146d-5aeb97d0480d/"
+)
+CALDAV_USER = "nate"
 CALDAV_PASSWORD = os.environ.get("HUGINN_CALDAV_PASSWORD", "")
 WEATHER_LOCATION = "Joplin,MO"
 

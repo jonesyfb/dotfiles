@@ -899,12 +899,12 @@ dependencies = [
     { name = "faster-whisper" },
     { name = "html2text" },
     { name = "httpx" },
+    { name = "pillow" },
     { name = "sqlite-vec" },
 ]
 
 [package.dev-dependencies]
 dev = [
-    { name = "pillow" },
     { name = "pytest" },
 ]
 
@@ -918,14 +918,12 @@ requires-dist = [
     { name = "faster-whisper", specifier = ">=1.0.0" },
     { name = "html2text", specifier = ">=2024.2.26" },
     { name = "httpx", specifier = ">=0.27.0" },
+    { name = "pillow", specifier = ">=12.3.0" },
     { name = "sqlite-vec", specifier = ">=0.1.9" },
 ]
 
 [package.metadata.requires-dev]
-dev = [
-    { name = "pillow", specifier = ">=12.3.0" },
-    { name = "pytest", specifier = ">=9.1.1" },
-]
+dev = [{ name = "pytest", specifier = ">=9.1.1" }]
 
 [[package]]
 name = "hyperframe"

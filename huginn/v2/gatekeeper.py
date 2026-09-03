@@ -4,24 +4,31 @@ Huginn to judge whether gated apps (Steam, recreational YouTube) are earned.
 """
 import asyncio
 import json
+import logging
 import random
 import re
 import subprocess
 import time
 
+from capture import (
+    CaptureLockTimeout, capture_fresh_on_demand, capture_screenshot,
+    prepare_evidence_for_model,
+)
 from config import (
     ACTIVITY_POLL, BROWSER_APPS, EDITOR_APPS, GATE_PROMPT, GATE_TTL_SECONDS,
-    MODELS, SCREENS_DIR, SCREENSHOT_INTERVAL, SCREENSHOT_KEEP,
-    STEAM_BYPASS_GRACE_SECONDS, YOUTUBE_GRACE_SECONDS,
+    MAX_HISTORICAL_SCREENSHOTS, MODELS, SCREENS_DIR, SCREENSHOT_INTERVAL,
+    SCREENSHOT_KEEP, STEAM_BYPASS_GRACE_SECONDS, YOUTUBE_GRACE_SECONDS,
 )
 from context import focused_window as _focused_window, in_discord_call
 from coordinator import Denial
 from evidence import InvalidReason, validate_screenshots
-from llm import CoordinatorDenied, judge_local_only, unload_model
+from llm import CoordinatorDenied, OllamaInvalidRequest, judge_local_only, unload_model
 from memory import (
     activity_since, last_verdict, log_activity, prune_activity,
     recent_screenshots, recent_verdicts, save_screenshot, save_verdict,
 )
+
+log = logging.getLogger("huginn.gatekeeper")
 
 _YOUTUBE_RE = re.compile(r"-\s*YouTube\s*-", re.I)
 _STEAM_APP_RE = re.compile(r"^steam(_app_\d+)?$")
@@ -72,7 +79,10 @@ async def activity_tracker_worker() -> None:
 
 async def screenshot_worker() -> None:
     """Every SCREENSHOT_INTERVAL seconds, if an editor is focused, grab a
-    screenshot as evidence for future gate judgments."""
+    screenshot as evidence for future gate judgments. Capture itself is
+    the same primitive check_gate()'s on-demand capture uses
+    (capture.capture_screenshot) — this worker's only job is deciding
+    *when* (editor focused, on the long periodic cadence)."""
     SCREENS_DIR.mkdir(parents=True, exist_ok=True)
     await asyncio.sleep(45)
     while True:
@@ -81,14 +91,8 @@ async def screenshot_worker() -> None:
         if win is None or win.get("app_id", "") not in EDITOR_APPS:
             continue
         app_id = win["app_id"]
-        path = SCREENS_DIR / f"{int(time.time())}.png"
-        try:
-            await asyncio.to_thread(
-                subprocess.run, ["grim", str(path)], capture_output=True, timeout=10
-            )
-        except Exception:
-            continue
-        if not path.exists():
+        path = await capture_screenshot("periodic")
+        if path is None:
             continue
         await asyncio.to_thread(save_screenshot, str(path), app_id)
         _prune_screenshots()
@@ -175,16 +179,72 @@ _EVIDENCE_INVALID_MESSAGES = {
     InvalidReason.TIMESTAMP_MISMATCH: "Evidence doesn't match recent activity — can't verify. Try again shortly.",
 }
 
+_CAPTURE_FAILED_MESSAGE = "Couldn't capture evidence right now — can't verify. Try again shortly."
+_CAPTURE_LOCK_TIMEOUT_MESSAGE = "Busy capturing evidence for another check — try again in a moment."
+_INVALID_REQUEST_MESSAGE = "Couldn't verify right now. Try again shortly."
+
 
 def _latest_activity_ts(window_seconds: int = 12 * 3600) -> float | None:
     rows = activity_since(window_seconds)
     return max((r["ts"] for r in rows), default=None)
 
 
+def _bounded_evidence_paths(fresh: str) -> list[str]:
+    """Mandatory fresh capture + at most MAX_HISTORICAL_SCREENSHOTS other
+    recent screenshots, deduplicated by path, explicitly ordered oldest
+    historical first and the mandatory fresh capture always last (it's the
+    one guaranteed to cover the activity that triggered this check)."""
+    historical = recent_screenshots(limit=MAX_HISTORICAL_SCREENSHOTS + 1)
+    seen = {fresh}
+    picked: list[str] = []
+    for p in historical:
+        if p in seen:
+            continue
+        seen.add(p)
+        picked.append(p)
+        if len(picked) >= MAX_HISTORICAL_SCREENSHOTS:
+            break
+    picked.reverse()
+    picked.append(fresh)
+    return picked
+
+
 async def check_gate(target: str) -> dict:
     cached = last_verdict(target, GATE_TTL_SECONDS)
     if cached:
         return {"approved": bool(cached["approved"]), "message": cached["message"], "cached": True}
+
+    # The activity that triggered this check is already recorded by the
+    # time check_gate runs (activity_tracker_worker logs before calling
+    # this) — capture a fresh screenshot now, on demand, rather than
+    # trusting whatever the periodic editor-only worker happened to grab
+    # last. This is what actually fixes the timestamp-mismatch race: a
+    # gate check no longer depends on a screenshot that can be up to
+    # SCREENSHOT_INTERVAL stale relative to the activity it's judging.
+    latest_activity_ts = _latest_activity_ts()
+    try:
+        fresh_path = await capture_fresh_on_demand(target)
+    except CaptureLockTimeout:
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": _CAPTURE_LOCK_TIMEOUT_MESSAGE,
+            "cached": False,
+            "reason": "capture_lock_timeout",
+        }
+    if fresh_path is None:
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": _CAPTURE_FAILED_MESSAGE,
+            "cached": False,
+            "reason": "capture_failed",
+        }
+
+    win = await asyncio.to_thread(_focused_window)
+    app_id = (win or {}).get("app_id") or target
+    await asyncio.to_thread(save_screenshot, str(fresh_path), app_id)
+    _prune_screenshots()
 
     # Evidence validity is a deterministic, pre-inference check — moved out
     # of model judgment entirely. Audition finding: every candidate model
@@ -193,8 +253,11 @@ async def check_gate(target: str) -> dict:
     # uncertainty (0.0-0.6 calibration across the board). A model never
     # even sees evidence that fails this check, and this never claims
     # procrastination — it's a distinct "can't verify" result, not a denial.
-    images = recent_screenshots(limit=5)
-    check = validate_screenshots(images, latest_activity_ts=_latest_activity_ts())
+    # Still run even with a guaranteed-fresh capture in hand: a genuinely
+    # broken clock or a capture that silently covers the wrong screen
+    # should still be caught here, not just trusted because grim exited 0.
+    images = _bounded_evidence_paths(str(fresh_path))
+    check = validate_screenshots(images, latest_activity_ts=latest_activity_ts)
     if not check.valid:
         return {
             "approved": False,
@@ -204,6 +267,8 @@ async def check_gate(target: str) -> dict:
             "reason": check.reason.value,
         }
 
+    model_images = prepare_evidence_for_model(list(check.valid_paths))
+
     prompt = GATE_PROMPT.format(
         target=target,
         activity_summary=activity_summary(),
@@ -212,8 +277,23 @@ async def check_gate(target: str) -> dict:
     )
 
     try:
-        raw = await judge_local_only(prompt, list(check.valid_paths))
+        raw = await judge_local_only(prompt, model_images)
         verdict = _parse_verdict(raw)
+    except OllamaInvalidRequest as e:
+        # Malformed request to Ollama (root cause, investigated live: full-
+        # resolution evidence exceeding num_ctx — see capture.py's resize
+        # and llm._judge_ollama's options) — distinct from a backend/
+        # network failure. Logged (status/category only) in llm.py, never
+        # here, and never cached: whatever made the request malformed may
+        # not on the next attempt (e.g. evidence set size changes).
+        log.warning("gate check for %r hit an invalid Ollama request: category=%s", target, e.category)
+        return {
+            "approved": False,
+            "uncertain": True,
+            "message": _INVALID_REQUEST_MESSAGE,
+            "cached": False,
+            "reason": "invalid_request",
+        }
     except CoordinatorDenied as e:
         if e.denial == Denial.GAME_MODE:
             # Resource policy, not a judgment: gemma4:31b doesn't fit this

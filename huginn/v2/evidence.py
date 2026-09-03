@@ -48,7 +48,9 @@ class EvidenceCheck:
     detail: str  # machine-readable-ish diagnostic string, never sent to the model
 
 
-def _is_valid_png(path: Path) -> bool:
+def is_valid_png(path: Path) -> bool:
+    """Public: also used by capture.py to reject a grim output file that
+    exists but isn't a decodable PNG (truncated write, wrong format)."""
     try:
         with open(path, "rb") as f:
             return f.read(8) == b"\x89PNG\r\n\x1a\n"
@@ -83,7 +85,7 @@ def validate_screenshots(
             reasons_seen.add(InvalidReason.MISSING)
             problems.append(f"{p}: does not exist")
             continue
-        if not _is_valid_png(path):
+        if not is_valid_png(path):
             reasons_seen.add(InvalidReason.CORRUPT)
             problems.append(f"{p}: not a valid PNG (corrupt or wrong format)")
             continue

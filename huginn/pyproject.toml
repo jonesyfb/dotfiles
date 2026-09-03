@@ -12,10 +12,10 @@ dependencies = [
     "caldav>=3.1.0",
     "ddgs>=9.14.4",
     "sqlite-vec>=0.1.9",
+    "pillow>=12.3.0",
 ]
 
 [dependency-groups]
 dev = [
-    "pillow>=12.3.0",
     "pytest>=9.1.1",
 ]

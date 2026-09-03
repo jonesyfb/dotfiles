@@ -34,3 +34,21 @@ def _reset_coordinator_singleton():
     _reset()
     yield
     _reset()
+
+
+@pytest.fixture(autouse=True)
+def _reset_capture_singleflight():
+    """capture._capture_task/_capture_task_lock are module-level singletons
+    for the same reason as the coordinator above — an asyncio.Lock/Task
+    bound to one test's event loop breaks the next test's fresh loop."""
+    import asyncio
+
+    import capture as capture_module
+
+    def _reset():
+        capture_module._capture_task = None
+        capture_module._capture_task_lock = asyncio.Lock()
+
+    _reset()
+    yield
+    _reset()
