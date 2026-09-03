@@ -495,3 +495,112 @@ async def render(
 
     return RenderResult(False, None, None, deterministic, "validation_failed", request.action_metadata)
 
+
+# ── Direct conversational path (high-confidence SOCIAL_DIRECT only) ─────────────
+# Separate from render() above on purpose: there is no discrete "event" here
+# with facts to withhold and a deterministic sentence to compose — this is
+# an actual back-and-forth conversation. Same hard boundary as everywhere
+# else in this module: no tools, no cloud fallback, structurally validated
+# against claiming an action, a memory, or a desktop fact it wasn't given.
+
+DIRECT_SOCIAL_MAX_LENGTH = 600  # 400 was too tight for a substantive "blunt friend" reply to a real disclosure — observed live forcing an unnecessary fallback to the existing route (scripts/direct_social eval, vulnerable-disclosure case)
+DIRECT_SOCIAL_DEADLINE_SECONDS = AMBIENT_RENDER_DEADLINE_SECONDS  # same model, same coordinator path, already measured
+
+_FABRICATED_MEMORY_PHRASES = (
+    "i remember you", "you told me", "you mentioned before", "as you said earlier",
+    "i recall you", "last time you said",
+)
+_DESKTOP_FACT_CLAIM_PHRASES = (
+    "your screen shows", "i can see your", "looking at your desktop", "your current window",
+    "you have open", "i'm looking at",
+)
+
+
+@dataclass(frozen=True)
+class DirectSocialResult:
+    ok: bool
+    text: "str | None"
+    reason: str
+
+
+def _validate_direct_social(text: str) -> "str | None":
+    if not text.strip():
+        return "empty"
+    if len(text) > DIRECT_SOCIAL_MAX_LENGTH:
+        return "too_long"
+    if any(marker in text for marker in _THEATRICAL_MARKERS):
+        return "theatrical_formatting"
+    if text.strip().lower().startswith("huginn:"):
+        return "self_prefixed"
+    low = text.lower()
+    if any(m in low for m in _KNOWN_MISSPELLINGS):
+        return "known_misspelling"
+    if any(re.search(rf"\b{re.escape(word)}\b", low) for word in _BANNED_ACTION_VERBS):
+        return "implies_action_outcome"
+    if any(p in low for p in _FABRICATED_MEMORY_PHRASES):
+        return "fabricated_memory_claim"
+    if any(p in low for p in _DESKTOP_FACT_CLAIM_PHRASES):
+        return "invented_desktop_fact"
+    return None
+
+
+def _build_direct_social_prompt(content: str, history: list[dict], entity_note: str) -> str:
+    lines = []
+    if history:
+        lines.append("Recent conversation (oldest first):")
+        for turn in history:
+            speaker = "Nathan" if turn["role"] == "user" else "You"
+            text = turn["content"] if isinstance(turn["content"], str) else str(turn["content"])
+            lines.append(f"{speaker}: {text}")
+        lines.append("")
+    if entity_note:
+        lines.append(entity_note)
+    lines.append(f"Nathan just said: {content}")
+    lines.append("Reply directly to him now, in character, following the ground rules and hard limits above.")
+    return "\n".join(lines)
+
+
+async def render_direct_social(
+    content: str,
+    *,
+    history: "list[dict] | None" = None,
+    entity_note: str = "",
+    deadline_seconds: "float | None" = None,
+) -> DirectSocialResult:
+    """Renders one direct-conversation reply. Never raises for expected
+    failure modes. Validation failure after one retry returns ok=False —
+    the caller (daemon.handle_chat) falls back to the existing
+    route_model()+tool-calling path for this message, never ships an
+    unvalidated reply."""
+    from config import DIRECT_SOCIAL_SYSTEM_PROMPT
+
+    deadline = deadline_seconds if deadline_seconds is not None else DIRECT_SOCIAL_DEADLINE_SECONDS
+    prompt = _build_direct_social_prompt(content, history or [], entity_note)
+
+    for attempt in range(PERSONALITY_RENDER_MAX_RETRIES + 1):
+        p = prompt
+        if attempt > 0:
+            p += (
+                "\n\nYour previous reply was invalid (claimed an action, invented a memory or "
+                "desktop fact, or used stage directions/formatting). Reply again, plainly, "
+                "without any of that."
+            )
+        try:
+            raw = await render_personality_only(
+                DIRECT_SOCIAL_SYSTEM_PROMPT, p, purpose=Purpose.DIRECT, deadline_seconds=deadline,
+            )
+        except CoordinatorDenied as e:
+            log.info("direct_social denied: attempt=%d denial=%s", attempt, e.denial.value)
+            return DirectSocialResult(False, None, f"coordinator_denied:{e.denial.value}")
+        except Exception as e:
+            log.info("direct_social error: attempt=%d error_type=%s", attempt, type(e).__name__)
+            return DirectSocialResult(False, None, "error")
+
+        text = raw.strip()
+        problem = _validate_direct_social(text)
+        if problem is None:
+            log.info("direct_social ok: attempt=%d chars=%d", attempt, len(text))
+            return DirectSocialResult(True, text, "rendered")
+        log.info("direct_social validation failed: attempt=%d problem=%s", attempt, problem)
+
+    return DirectSocialResult(False, None, "validation_failed")

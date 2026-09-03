@@ -18,6 +18,7 @@ from pathlib import Path
 import ambient
 import context
 import entities
+import intent
 import personality
 from config import SOCKET_PATH, SYSTEM_PROMPT, GAME_MODE_FLAG
 from coordinator import Purpose, coordinator
@@ -46,13 +47,69 @@ async def send(writer: asyncio.StreamWriter, obj: dict) -> None:
 
 # ── Chat handler ──────────────────────────────────────────────────────────────
 
+def _entity_note_for(content: str) -> str:
+    """Only entities actually mentioned in this message, never a registry
+    dump. Empty string (not shown at all) when nothing resolves — e.g. a
+    message that only mentions "Parity" produces no note."""
+    mentions = entities.extract_mentions(content)
+    if not mentions:
+        return ""
+    lines = ["Resolved identities for things mentioned (use only if it fits naturally):"]
+    for name in mentions:
+        identity = entities.resolve(name)
+        if identity is None:
+            continue
+        bits = [f"{identity.canonical_name}"]
+        if identity.archetype:
+            bits.append(f"archetype: {identity.archetype}")
+        if identity.collective_form:
+            bits.append(f"collective form: {identity.collective_form}")
+        lines.append("  - " + ", ".join(bits))
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> None:
+    """High-confidence SOCIAL_DIRECT path: qwen3.5:4b via the coordinator,
+    DIRECT purpose, no tools, no route_model()/stream_chat() involved at
+    all for this turn. Falls back to the existing tool-capable route on
+    validation failure — never ships an unvalidated personality reply."""
+    history = get_history(limit=6)
+    if history and history[-1]["role"] == "user":
+        history = history[:-1]  # the current turn was already added by the caller
+
+    result = await personality.render_direct_social(
+        content, history=history, entity_note=_entity_note_for(content),
+    )
+    if result.ok:
+        await send(writer, {"type": "token", "content": result.text})
+        add_turn("assistant", result.text)
+        await send(writer, {"type": "done"})
+        return
+
+    log.info("direct_social fallback to existing route: reason=%s", result.reason)
+    await _handle_chat_via_existing_route(writer, content)
+
+
 async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
+    decision = intent.classify(content)
+
+    if decision.intent == intent.IntentClass.SOCIAL_DIRECT and decision.high_confidence:
+        add_turn("user", content)
+        await handle_direct_social(writer, content)
+        return
+
     if Path(GAME_MODE_FLAG).exists():
         await send(writer, {"type": "token", "content": "Game mode. Standing down. ᚹ"})
         await send(writer, {"type": "done"})
         return
 
     add_turn("user", content)
+    await _handle_chat_via_existing_route(writer, content)
+
+
+async def _handle_chat_via_existing_route(writer: asyncio.StreamWriter, content: str) -> None:
+    """Unmodified from before the direct-social routing layer existed —
+    route_model()/stream_chat()/tool-calling loop, exactly as always."""
     model_key = route_model(content)
 
     history = get_history(limit=40)
