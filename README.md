@@ -1,6 +1,7 @@
 # dotfiles
 
-Personal config for niri, kitty, fuzzel, swaylock, quickshell, zed, huginn, and vim.
+Personal config for niri, kitty, fuzzel, swaylock, quickshell, zed, huginn,
+OpenCode, and vim.
 
 ## Setup on a new machine
 
@@ -15,6 +16,16 @@ into `~/.config/`.
 
 Submodules: `niri`, `kitty`, `fuzzel`, `swaylock`, `quickshell`, `zed`, `vim`.
 Run `git submodule update --init --recursive` if they're empty after clone.
+
+### OpenCode
+
+The OpenCode MCP config reads its Cloudflare Access credentials from the
+environment. Set these outside the repository before starting OpenCode:
+
+```sh
+export CF_ACCESS_CLIENT_ID="..."
+export CF_ACCESS_CLIENT_SECRET="..."
+```
 
 ## Vim / LSP setup
 

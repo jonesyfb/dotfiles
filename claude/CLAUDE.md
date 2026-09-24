@@ -11,6 +11,13 @@ Claude on judgment and push everything else to Codex. Nate runs Claude in
 many projects at once, all drawing the same quota — assume the budget is
 already under pressure before this session started.
 
+Codex panes currently run GPT-6 Astra, which is more capable than the
+GPT-5.6 Sol model used by OpenCode. Prioritize Codex for heavy-lifting
+implementation, difficult analysis, and substantial reviews. Do not waste
+Codex turns on routine commands such as `cargo check`, lint, formatting, or
+simple test runs when OpenCode can run them directly and interpret the output;
+delegate verification only when its input/output fan-out makes that worthwhile.
+
 ## The criterion that actually matters
 
 Not task type — **fan-out ratio**. How much material must enter context
