@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 import secrets
 import subprocess
 import time
@@ -38,6 +39,41 @@ from evidence import is_valid_png
 log = logging.getLogger("huginn.capture")
 
 RESIZED_DIR = SCREENS_DIR / "resized"
+
+_resolved_grim_env: dict[str, str] | None = None
+
+
+def _grim_env() -> dict[str, str]:
+    """grim needs WAYLAND_DISPLAY to find the compositor socket. huginn.service
+    only gets it if niri had already pushed it into the systemd user manager
+    before the daemon forked (a boot-time race — see huginn.service's
+    After=graphical-session.target and the 2026-09-04 fix); ordering alone
+    hasn't been reliable enough in practice, and every grim call since a
+    fork with a stale env fails identically until the daemon restarts. If
+    our own process env is missing it, pull the *current* value straight
+    from the systemd user manager instead of trusting the fork-time
+    snapshot — self-heals without needing a daemon restart."""
+    global _resolved_grim_env
+    if _resolved_grim_env is not None:
+        return _resolved_grim_env
+    env = dict(os.environ)
+    if "WAYLAND_DISPLAY" in env:
+        _resolved_grim_env = env
+        return env
+    try:
+        out = subprocess.run(
+            ["systemctl", "--user", "show-environment"],
+            capture_output=True, timeout=5, text=True, check=True,
+        ).stdout
+        for line in out.splitlines():
+            key, sep, value = line.partition("=")
+            if sep and key in ("WAYLAND_DISPLAY", "DISPLAY", "XDG_RUNTIME_DIR") and key not in env:
+                env[key] = value
+    except Exception as e:
+        log.warning("could not resolve display environment for grim: %s", e)
+    if "WAYLAND_DISPLAY" in env:
+        _resolved_grim_env = env
+    return env
 
 
 async def capture_screenshot(tag: str) -> "Path | None":
@@ -55,6 +91,7 @@ async def capture_screenshot(tag: str) -> "Path | None":
     try:
         proc = await asyncio.to_thread(
             subprocess.run, ["grim", str(path)], capture_output=True, timeout=GRIM_TIMEOUT_SECONDS,
+            env=_grim_env(),
         )
     except Exception as e:
         log.warning("grim capture failed to run: %s", e)

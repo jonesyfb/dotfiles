@@ -326,16 +326,6 @@ def recent_verdicts(target: str, limit: int = 5) -> list[dict]:
         return [dict(r) for r in rows]
 
 
-def last_verdict(target: str, within_seconds: int) -> dict | None:
-    with db() as c:
-        row = c.execute(
-            "SELECT approved, message, ts FROM gate_verdicts "
-            "WHERE target=? AND ts >= unixepoch() - ? ORDER BY ts DESC LIMIT 1",
-            (target, within_seconds),
-        ).fetchone()
-        return dict(row) if row else None
-
-
 # ── Ambient interruption policy: cooldown/budget/dedup state ────────────────────
 # Only actually-spoken events are logged here (not denied attempts) — this
 # table's meaning is "what Huginn has said ambiently," which is exactly what

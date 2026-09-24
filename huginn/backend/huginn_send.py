@@ -70,7 +70,7 @@ def main() -> None:
                     print(line, flush=True)
                     try:
                         obj = json.loads(line)
-                        if obj.get("type") in ("done", "cleared", "recovered", "pong", "error", "confirm_ack", "model_switched", "gate_verdict", "gate_history", "context_snapshot"):
+                        if obj.get("type") in ("done", "cleared", "recovered", "pong", "error", "model_switched", "gate_verdict", "gate_history", "context_snapshot"):
                             return
                     except json.JSONDecodeError:
                         pass

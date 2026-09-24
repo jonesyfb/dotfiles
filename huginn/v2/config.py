@@ -14,7 +14,6 @@ BROWSER_APPS = {"brave-browser", "firefox", "chromium", "google-chrome"}
 SCREENSHOT_INTERVAL = 600  # seconds between screenshots while an editor is focused
 SCREENSHOT_KEEP = 8  # rolling buffer size
 ACTIVITY_POLL = 30  # seconds between window-focus polls
-GATE_TTL_SECONDS = 600  # cache a verdict this long before re-judging
 YOUTUBE_GRACE_SECONDS = 90  # continuous YouTube focus before it counts as recreational
 STEAM_BYPASS_GRACE_SECONDS = (
     60  # continuous Steam/game focus before checking for a bypass

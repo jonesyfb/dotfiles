@@ -32,7 +32,7 @@ from memory import (
     enqueue_task, get_pending_tasks, update_task_status, get_all_tasks,
     log_ambient_event, recent_verdicts,
 )
-from tools import TOOL_DEFINITIONS, TOOL_TRUST, shell_is_safe
+from tools import TOOL_DEFINITIONS, TOOL_TRUST, run_tool, shell_is_safe
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 log = logging.getLogger("huginn")
@@ -310,6 +310,29 @@ async def handle_direct_social(writer: asyncio.StreamWriter, content: str) -> No
     await send(writer, {"type": "done"})
 
 
+_STEAM_LAUNCH_RE = re.compile(r"\b(open|launch|run|start|play|fire up)\b[^.?!]{0,15}\bsteam\b", re.I)
+_STEAM_LAUNCH_NEGATION_RE = re.compile(r"\b(don'?t|do not|shouldn'?t|won'?t|never|stop|cancel)\b", re.I)
+
+
+async def _handle_steam_launch_request(writer: asyncio.StreamWriter) -> None:
+    """Deterministic bypass for an explicit "open/launch/run steam"
+    request — the model doesn't get a vote on whether to actually call
+    launch_steam. Live-observed: qwen3.5:9b narrated its intent to call
+    the tool instead of structurally calling it often enough (~2/3 of
+    attempts) to be a real reliability gap for a request this
+    unambiguous, landing the deterministic "no tool call happened"
+    fallback instead of ever touching Steam. This runs the exact same
+    tools.launch_steam the model could otherwise call (still internally
+    re-checks the real gate) — only the routing is deterministic, not
+    the verdict."""
+    await send(writer, {"type": "tool_call", "tool": "launch_steam", "args": {}})
+    result = await run_tool("launch_steam", {})
+    await send(writer, {"type": "tool_result", "tool": "launch_steam", "output": result})
+    add_turn("assistant", result)
+    await send(writer, {"type": "token", "content": result})
+    await send(writer, {"type": "done"})
+
+
 async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
     decision = intent.classify(content)
     log.info(
@@ -328,6 +351,11 @@ async def handle_chat(writer: asyncio.StreamWriter, content: str) -> None:
         return
 
     add_turn("user", content)
+
+    if _STEAM_LAUNCH_RE.search(content) and not _STEAM_LAUNCH_NEGATION_RE.search(content):
+        await _handle_steam_launch_request(writer)
+        return
+
     await _handle_chat_via_existing_route(writer, content, decision)
 
 

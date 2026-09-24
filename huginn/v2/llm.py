@@ -419,10 +419,22 @@ async def _render_personality_raw(system_prompt: str, user_prompt: str, model: s
     substitute for post-generation validation — it stops an over-long reply
     from ever being fully generated, but a model can still ignore length
     guidance within that budget, which is what the caller's validator is
-    for."""
+    for.
+
+    `num_gpu: 0` during game mode is load-bearing, not an optimization: this
+    is the one code path Ollama is ever allowed to run through while a game
+    is running (RESIDENT_PERSONALITY/GAME_MODE_PERSONALITY_ONLY are the only
+    classes admitted — see coordinator._GAME_MODE_ALLOWED_CLASSES), and a
+    resident model contending with the game for VRAM has crashed the desktop
+    before (amdgpu OOM, see the ollama-crashes memory). num_gpu=0 forces
+    Ollama to run entirely on CPU/RAM for this call — deterministic, not a
+    hint the model can ignore, so there's no partial-GPU state to guard
+    against."""
     options = {"temperature": 0.7}
     if max_tokens is not None:
         options["num_predict"] = max_tokens
+    if is_game_mode():
+        options["num_gpu"] = 0
     payload = {
         "model": model,
         "messages": [

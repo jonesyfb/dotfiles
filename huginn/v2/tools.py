@@ -9,6 +9,7 @@ from pathlib import Path
 
 import httpx
 
+from gatekeeper import check_gate
 from memory import set_fact, all_facts, delete_fact
 
 # ── Trust tiers ───────────────────────────────────────────────────────────────
@@ -28,6 +29,8 @@ TOOL_TRUST: dict[str, str] = {
     "search_memory": "auto",
     "queue_task":    "confirm",
     "claude_code":   "confirm",
+    "gate_status":   "auto",
+    "launch_steam":  "auto",
 }
 
 # Prefixes that are always safe to run without confirmation
@@ -261,6 +264,40 @@ TOOL_DEFINITIONS = [
     {
         "type": "function",
         "function": {
+            "name": "gate_status",
+            "description": (
+                "Check (or re-check) whether Steam or recreational YouTube is currently "
+                "earned. Runs the SAME real judgment the desktop launcher uses — not a "
+                "guess. Status only — does NOT launch anything. Call this when the user "
+                "asks whether they're allowed, argues their case, or asks why they were "
+                "denied. To actually open Steam, call launch_steam instead."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "target": {"type": "string", "enum": ["steam", "youtube"]},
+                },
+                "required": ["target"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "launch_steam",
+            "description": (
+                "Actually opens Steam — use this when the user asks to open/launch/run/"
+                "play Steam, not gate_status (which only reports a verdict, never "
+                "launches). Internally re-runs the real gatekeeper check itself, so it "
+                "can't launch on a stale or someone-else's verdict; denies with the same "
+                "message gate_status would give if not earned."
+            ),
+            "parameters": {"type": "object", "properties": {}},
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "forget",
             "description": "Delete a fact from persistent memory.",
             "parameters": {
@@ -303,6 +340,10 @@ async def run_tool(name: str, args: dict) -> str:
                 return await _calendar_list(args.get("days", 7))
             case "notify":
                 return await _notify(args["title"], args["body"])
+            case "gate_status":
+                return await _gate_status(args["target"])
+            case "launch_steam":
+                return await _launch_steam()
             case "claude_code":
                 return await _claude_code(args["prompt"], args.get("cwd", ""))
             case "remember":
@@ -573,3 +614,38 @@ async def _notify(title: str, body: str, notif_type: str = "info") -> str:
     )
     await proc.wait()
     return "sent"
+
+
+async def _gate_status(target: str) -> str:
+    """Runs the real gatekeeper judgment (same code path the desktop
+    launcher uses) instead of letting the model freelance an opinion in
+    chat disconnected from actual gate state. check_gate() itself logs
+    the verdict into conversation history, so this closes the loop the
+    other way too: a denial reached from chat is now visible to any
+    later desktop-side check via recent_verdicts(), same as the reverse."""
+    verdict = await check_gate(target)
+    status = "APPROVED" if verdict["approved"] else "DENIED"
+    return f"{status}: {verdict['message']}"
+
+
+async def _launch_steam() -> str:
+    """Re-checks the gate itself rather than trusting a prior gate_status
+    call in the same conversation — the only guarantee that what's judged
+    is what's about to run, not a verdict that's since gone stale (day
+    rolled over, activity changed) or one for a different target.
+    Real binary, same as the ~/.local/bin/steam shim and the .desktop
+    Exec= both point at — detached (start_new_session) so Steam's lifetime
+    isn't tied to huginn.service and survives a daemon restart."""
+    verdict = await check_gate("steam")
+    if not verdict["approved"]:
+        return f"DENIED: {verdict['message']}"
+    try:
+        await asyncio.create_subprocess_exec(
+            "/usr/sbin/steam",
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+            start_new_session=True,
+        )
+    except Exception as e:
+        return f"error: approved but failed to launch: {e}"
+    return f"APPROVED: {verdict['message']} Steam is launching now."

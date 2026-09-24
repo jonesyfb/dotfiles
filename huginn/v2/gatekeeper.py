@@ -15,7 +15,7 @@ from capture import (
     prepare_evidence_for_model,
 )
 from config import (
-    ACTIVITY_POLL, BROWSER_APPS, EDITOR_APPS, GATE_PROMPT, GATE_TTL_SECONDS,
+    ACTIVITY_POLL, BROWSER_APPS, EDITOR_APPS, GATE_PROMPT,
     MAX_HISTORICAL_SCREENSHOTS, MODELS, SCREENS_DIR, SCREENSHOT_INTERVAL,
     SCREENSHOT_KEEP, STEAM_BYPASS_GRACE_SECONDS, YOUTUBE_GRACE_SECONDS,
 )
@@ -24,7 +24,7 @@ from coordinator import Denial
 from evidence import InvalidReason, validate_screenshots
 from llm import CoordinatorDenied, OllamaInvalidRequest, judge_local_only, unload_model
 from memory import (
-    activity_since, last_verdict, log_activity, prune_activity,
+    activity_since, add_turn, log_activity, prune_activity,
     recent_screenshots, recent_verdicts, save_screenshot, save_verdict,
 )
 
@@ -209,10 +209,34 @@ def _bounded_evidence_paths(fresh: str) -> list[str]:
     return picked
 
 
+def _log_verdict_to_history(target: str, message: str) -> None:
+    """Real stances (approve/deny — never a transient uncertain/infra
+    result) go into the same `history` table the chat panel reads for
+    context. Without this, a desktop-triggered denial and a chat plea
+    about it were two disconnected systems: the model in chat had no
+    idea a denial just happened, and arguing "let me open steam, it's
+    Sunday" in chat couldn't touch the actual verdict. Tagged so the
+    model can tell it's a gatekeeper stance, not something it said itself."""
+    add_turn("assistant", f"[gatekeeper:{target}] {message}")
+
+
 async def check_gate(target: str) -> dict:
-    cached = last_verdict(target, GATE_TTL_SECONDS)
-    if cached:
-        return {"approved": bool(cached["approved"]), "message": cached["message"], "cached": True}
+    # No verdict caching — a stale denial used to stick around for
+    # GATE_TTL_SECONDS regardless of what changed (new day, joined a
+    # Discord call with friends, argued the case in chat), so a legit
+    # "circumstances changed" retry got the exact same canned denial back.
+    # Every check re-judges fresh now; recent_verdicts() below still feeds
+    # the prompt so tone stays consistent without blocking a real re-look.
+
+    # Hardcoded Sunday lenience: no work-earned standard applies on a day
+    # off. Skips judgment entirely (no capture, no model call) rather than
+    # just biasing the prompt — a day-of-week check is a fact, not
+    # something that needs an LLM's opinion.
+    if time.localtime().tm_wday == 6:  # Monday=0 .. Sunday=6
+        verdict = {"approved": True, "message": "It's Sunday. Go have fun.", "cached": False}
+        save_verdict(target, True, verdict["message"])
+        _log_verdict_to_history(target, verdict["message"])
+        return verdict
 
     # The activity that triggered this check is already recorded by the
     # time check_gate runs (activity_tracker_worker logs before calling
@@ -335,6 +359,7 @@ async def check_gate(target: str) -> dict:
     verdict["message"] = _clip(verdict["message"])
     if not verdict.get("uncertain"):
         save_verdict(target, verdict["approved"], verdict["message"])
+        _log_verdict_to_history(target, verdict["message"])
     return {**verdict, "cached": False}
 
 
